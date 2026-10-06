@@ -142,3 +142,88 @@ Work Log:
 
 Stage Summary:
 - Production-ready YouTube-like site on single `/` route with 4 views (home/watch/channel/search), real playable videos, full interactivity (like/subscribe/comment/search/filter), dark+light themes, responsive + sticky footer. Lint clean, dev server healthy (GET / 200).
+
+---
+Task ID: vc-1
+Agent: main (orchestrator) — video call foundation
+Task: Pivot from YouTube to Instagram-style 1:1 WebRTC video call app. Signaling service + WebRTC lib + store.
+
+Work Log:
+- Honest note to user: bridging into real Instagram call infra is NOT possible (no public API). Building a standalone Instagram-style WebRTC app instead, with aggressive reconnection to solve the "connection lost" pain point.
+- Installed socket.io-client in main project; created mini-services/signaling-service (separate bun project, socket.io on port 3003, path '/', resilient pings). Installed deps, started `bun --hot` in background (signaling.log). Verified reachable via gateway: curl localhost:81/socket.io?...&XTransformPort=3003 -> 200.
+- Created src/lib/signaling.ts: Signaling class wrapping socket.io with auto-reconnect, room:join (ack youAreCaller), rejoin after reconnect, signal relay, peer-joined/left events.
+- Created src/lib/webrtc.ts: CallManager with:
+  * Perfect-negotiation pattern (polite/impolite) for safe (re)negotiation
+  * ICE restart (pc.restartIce + createOffer iceRestart) on failed/disconnected
+  * Buffered initial offer + candidates until peer present (caller side)
+  * Bounded reconnect loop with exponential backoff (max 8 attempts)
+  * Network online/offline listeners -> recovery instead of teardown
+  * Media controls via track.enabled / replaceTrack (no renegotiation needed)
+  * Graceful camera-denied fallback to audio-only
+- Created src/lib/vc-store.ts: Zustand store (roomId, role, status, local/remote streams, micOn/camOn, reconnectAttempt, error, callStartedAt)
+
+Stage Summary:
+- Signaling service running on 3003. Core WebRTC resilience logic in place.
+- Contracts ready for UI: Signaling @ '@/lib/signaling', CallManager (CallStatus) @ '@/lib/webrtc', useVCStore @ '@/lib/vc-store'.
+- Next: presentational VC components (subagent) + call-room orchestrator (main) + page.tsx router.
+
+---
+Task ID: vc-3
+Agent: full-stack-developer (VC presentational UI)
+Task: Build the 5 presentational components for the Instagram-style 1:1 WebRTC call (video-tile, call-controls, reconnecting-overlay, call-timer, lobby).
+
+Work Log:
+- Read worklog.md (especially vc-1) and confirmed contracts: CallStatus @ '@/lib/webrtc', useVCStore @ '@/lib/vc-store', shadcn Button/Input @ '@/components/ui/*', cn @ '@/lib/utils', lucide-react icons (Mic/MicOff/Video/VideoOff/PhoneOff/SwitchCamera/Zap/Shield/Users/ArrowRight).
+- Wrote src/components/vc/video-tile.tsx — 'use client', reusable <video> binding a MediaStream via srcObject + play().catch(()=>{}) in an effect keyed on stream; mirror via scale-x-[-1]; muted default true (with second effect keeping the muted attr in sync); object-cover/contain toggle; renders placeholder when stream null; h-full w-full bg-black.
+- Wrote src/components/vc/call-controls.tsx — 'use client', Instagram-style floating pill (bg-black/60 backdrop-blur-md rounded-full p-2). Round size-12 toggle buttons (mic, cam) that flip between translucent white (ON) and solid white/black (OFF) for high contrast when muted. SwitchCamera button visibility gated by canSwitchCamera (default true). Larger size-14 red (bg-red-600) end-call button with PhoneOff. All buttons carry aria-label + aria-pressed; wrapped in role=toolbar.
+- Wrote src/components/vc/reconnecting-overlay.tsx — 'use client'. Returns null when !visible. When visible, absolute inset-0 z-20 flex items-center justify-center pointer-events-none over a relative parent. Centered translucent panel (bg-black/70 backdrop-blur rounded-2xl px-6 py-5) with an animate-spin border-2 ring spinner, "Reconnecting…" title, attempt-aware subtitle ("Attempt N — keeping the call alive" or "Network unstable — recovering"), optional muted reason line. role=status aria-live=polite.
+- Wrote src/components/vc/call-timer.tsx — 'use client'. 1s setInterval that only runs when running && startedAt != null. formatElapsed => M:SS (or H:MM:SS past 1h). Displays "0:00" when not running. Re-syncs `now` on each mount/dependency change so stale values never flash. Renders an accessible <span aria-label="Call duration">.
+- Wrote src/components/vc/lobby.tsx — 'use client', self-contained, uses useRouter from next/navigation. Centered card on a dark radial-gradient background (oklch(0.22 0 0) -> oklch(0.12 0 0)). Red rounded-square logo with Video icon + "VuCall" wordmark (Call in text-primary). Subtitle in Indonesian. Primary "Mulai panggilan" button (genRoomId = 6-char uppercase alphanumerics) -> router.push(`/?room=${id}`). "atau" divider. Join form (Input + "Gabung" Button) -> router.push(`/?room=${trimmed}`) on submit; disabled when empty; uppercase input + maxLength 12. 3-item features list (Zap/Shield/Users) with circle icons. Footer note about sharing the room link. Fully responsive (max-w-md, py-10).
+- Did NOT run lint/dev (orchestrator will lint after integration).
+- Wrote agent-ctx/vc-3-fullstack-developer.md work record.
+
+Stage Summary:
+- 5 files created (all 'use client', no `any`, no unused imports, accessible):
+  - src/components/vc/video-tile.tsx
+  - src/components/vc/call-controls.tsx
+  - src/components/vc/reconnecting-overlay.tsx
+  - src/components/vc/call-timer.tsx
+  - src/components/vc/lobby.tsx
+- All presentational components are prop-driven (no store coupling) so the call-room orchestrator can compose them freely; the lobby is the only one that owns navigation (useRouter).
+- Brand: red accent (text-primary / bg-primary), NO indigo/blue. Dark gradient backgrounds. Mobile-first.
+- Prop contracts (for orchestrator consumption):
+  * VideoTile: { stream, mirror?, muted?=true, objectCover?=true, className?, placeholder?, 'aria-label'? }
+  * CallControls: { micOn, camOn, onToggleMic, onToggleCam, onSwitchCamera, onEnd, canSwitchCamera?=true, disabled?=false }
+  * ReconnectingOverlay: { visible, attempt?, reason? }  (absolute inset-0; parent must be relative)
+  * CallTimer: { startedAt, running }  (renders <span>)
+  * Lobby: no props (reads nothing, owns useRouter)
+
+---
+Task ID: vc-4
+Agent: main (orchestrator) — VC integration, debugging, self-verification
+Task: Wire call-room orchestrator + page.tsx; debug WebRTC negotiation; Agent Browser self-verification
+
+Work Log:
+- Built src/components/vc/call-room.tsx: orchestrates Signaling + CallManager + store; onConnect→joinRoom→create manager (polite=!caller)→start()→drain pending signals; buffers signals before manager ready; renders remote full-bleed + local PiP + controls + reconnecting overlay + share-link card (waiting) + failed/ended screens.
+- Built src/app/page.tsx: Suspense-wrapped VCRouter (?room= → CallRoom, else Lobby). Updated layout metadata to "VuCall".
+- Added synthetic-media fallback in CallManager (canvas video + silent audio) so calls work even with no camera (headless demo + denied-permission graceful degradation).
+- CRITICAL BUGS FOUND & FIXED via two-session Agent Browser P2P test:
+  1. handleSignal silently dropped the offer when this.pc was null (offer arrived during getUserMedia/setup) → buffered signals inside CallManager + drain after buildPeerConnection.
+  2. ICE-restart glare: manual restartConnection + onnegotiationneeded both emitted offers → added restartInProgress guard to suppress the auto-offer during a manual ICE restart.
+  3. offline listener prematurely flipped status to 'reconnecting' even when ICE stayed connected → made ICE state the source of truth; online listener restores 'connected' if ICE never dropped, only restarts when actually needed.
+  4. Call timer reset on every 'connected' transition → made startCallTimer idempotent (only sets if null).
+- Trimmed verbose per-signal debug logs for production cleanliness; kept ice-state/ontrack/restart/drain diagnostics.
+
+Agent Browser self-verification (all passed):
+- Lobby renders (logo, "Mulai panggilan", join input, features list) — via gateway port 81 (localhost:3000 bypasses Caddy so XTransformPort forwarding needs the gateway).
+- Signaling connects through gateway (?XTransformPort=3003); server logs both peers joining the same room.
+- Two-session P2P WebRTC connection ESTABLISHED: ICE state `connected` on both, remote audio+video tracks flowing both ways (2 videos each with srcObject), call timer counting in sync.
+- Mute toggle works (button label flips Mute↔Unmute).
+- RECONNECTION: simulated `set offline on` (4s) then `set offline off` — the call SURVIVED with no interruption. Timer continued 0:08→0:20 across the network blip; never dropped to "Reconnecting" (ICE stayed connected through the brief outage). This is the core win vs Instagram's "connection lost" auto-drop.
+- End call: A returns to lobby; B shows "Panggilan berakhir — Teman Anda telah meninggalkan panggilan" with back-to-lobby button (peer-leave notification via room:peer-left).
+- No console errors throughout.
+
+Stage Summary:
+- Production-ready 1:1 WebRTC video call (Instagram-style UI) with aggressive reconnection that survives network blips instead of dropping.
+- Single `/` route; views switched via ?room=. Signaling mini-service on port 3003 via gateway.
+- Honest limitation: cannot bridge into real Instagram (no public API) — both peers open the shared web link. Longer network drops (>socket ping timeout) would need userId-based room rejoin + TURN for restrictive NATs (documented in code comments).

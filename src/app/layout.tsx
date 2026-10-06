@@ -15,24 +15,24 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "VuTube — Broadcast Yourself",
+  title: "VuCall — 1:1 Video Call yang Tidak Gampang Terputus",
   description:
-    "Watch, discover, and share videos. A YouTube-inspired demo built with Next.js, TypeScript, Tailwind CSS, and Prisma.",
-  keywords: ["VuTube", "video", "streaming", "Next.js", "TypeScript"],
-  authors: [{ name: "VuTube" }],
+    "Aplikasi panggilan video 1:1 bergaya Instagram dengan reconnect otomatis. Bagikan tautan ruangan — teman Anda cukup membukanya.",
+  keywords: ["VuCall", "video call", "WebRTC", "Next.js", "TypeScript"],
+  authors: [{ name: "VuCall" }],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
   openGraph: {
-    title: "VuTube — Broadcast Yourself",
-    description: "Watch, discover, and share videos.",
-    siteName: "VuTube",
+    title: "VuCall — 1:1 Video Call",
+    description: "Panggilan video 1:1 yang tidak gampang terputus.",
+    siteName: "VuCall",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "VuTube — Broadcast Yourself",
-    description: "Watch, discover, and share videos.",
+    title: "VuCall — 1:1 Video Call",
+    description: "Panggilan video 1:1 yang tidak gampang terputus.",
   },
 };
 
