@@ -1,0 +1,62 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Channel {
+  id          String   @id @default(cuid())
+  name        String
+  handle      String   @unique
+  avatar      String
+  banner      String
+  description String   @default("")
+  subscribers Int      @default(0)
+  verified    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  videos      Video[]
+}
+
+model Video {
+  id          String   @id @default(cuid())
+  channelId   String
+  channel     Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  title       String
+  description String   @default("")
+  thumbnail   String
+  videoUrl    String
+  duration    String   @default("10:00")
+  views       Int      @default(0)
+  likes       Int      @default(0)
+  dislikes    Int      @default(0)
+  category    String   @default("All")
+  tags        String   @default("")
+  publishedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  comments    Comment[]
+
+  @@index([channelId])
+  @@index([category])
+}
+
+model Comment {
+  id           String   @id @default(cuid())
+  videoId      String
+  video        Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  authorName   String
+  authorAvatar String
+  text         String
+  likes        Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([videoId])
+}
