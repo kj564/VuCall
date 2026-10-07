@@ -155,8 +155,6 @@ export class CallManager {
         } else {
           this.pendingCandidates.push(e.candidate.toJSON())
         }
-      } else {
-        console.log('[vc] ICE gathering complete')
       }
     }
 
@@ -167,7 +165,11 @@ export class CallManager {
       if (this.restartInProgress) return
       try {
         this.makingOffer = true
-        await pc.setLocalDescription()
+        // Explicit createOffer + setLocalDescription reliably starts ICE
+        // gathering (the implicit setLocalDescription() variant can be flaky
+        // about firing onicecandidate in some engines).
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
         if (this.peerPresent) {
           this.signaling.sendSignal('offer', pc.localDescription)
         } else {
@@ -260,7 +262,8 @@ export class CallManager {
 
         await pc.setRemoteDescription(desc)
         if (msg.type === 'offer') {
-          await pc.setLocalDescription()
+          const answer = await pc.createAnswer()
+          await pc.setLocalDescription(answer)
           this.signaling.sendSignal('answer', pc.localDescription)
         }
       } else if (msg.type === 'ice') {

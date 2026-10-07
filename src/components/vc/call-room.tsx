@@ -18,7 +18,7 @@ import {
   Sun,
 } from 'lucide-react'
 import { Signaling, type IncomingSignal } from '@/lib/signaling'
-import { CallManager, acquireLocalMedia, type CallStatus } from '@/lib/webrtc'
+import { CallManager, acquireLocalMedia, type AcquiredMedia, type CallStatus } from '@/lib/webrtc'
 import { useVCStore } from '@/lib/vc-store'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
@@ -28,6 +28,7 @@ import { CallControls } from './call-controls'
 import { ReconnectingOverlay } from './reconnecting-overlay'
 import { CallTimer } from './call-timer'
 import { QualityBars } from './quality-bars'
+import { PreJoin } from './pre-join'
 
 export function CallRoom() {
   const router = useRouter()
@@ -71,27 +72,47 @@ export function CallRoom() {
   const signalingRef = useRef<Signaling | null>(null)
   const pendingSignals = useRef<IncomingSignal[]>([])
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const mediaRef = useRef<AcquiredMedia | null>(null)
+  const mediaCleanupRef = useRef<(() => void) | null>(null)
+  const localStreamRef = useRef<MediaStream | null>(null)
   const [copied, setCopied] = useState(false)
+  const [joined, setJoined] = useState(false)
 
+  // Keep a ref in sync with the store's localStream so toggle handlers (which
+  // run during pre-join, before the manager exists) can flip track.enabled.
+  useEffect(() => {
+    localStreamRef.current = localStream
+  }, [localStream])
+
+  // Acquire local media on mount (for the pre-join preview + reuse when joined).
+  // Done BEFORE signaling so the user sees their camera instantly, independent
+  // of the signaling socket (which may be slow/blocked in an iframe).
   useEffect(() => {
     if (!roomId) return
     let disposed = false
-    let mediaCleanup: (() => void) | null = null
-
-    // Acquire the local camera/mic IMMEDIATELY on mount (not waiting for the
-    // signaling socket) so the user always sees their own video right away —
-    // even if the signaling connection is slow or blocked by the iframe. Falls
-    // back to a synthetic stream if the camera is unavailable/denied.
-    const mediaPromise = acquireLocalMedia().then((acq) => {
+    void acquireLocalMedia().then((acq) => {
       if (disposed) {
         acq.cleanup()
-        return acq
+        return
       }
-      mediaCleanup = acq.cleanup
+      mediaRef.current = acq
+      mediaCleanupRef.current = acq.cleanup
       setLocalStream(acq.stream)
       setCam(acq.camEnabled)
-      return acq
     })
+    return () => {
+      disposed = true
+      mediaCleanupRef.current?.()
+      mediaCleanupRef.current = null
+      mediaRef.current = null
+    }
+  }, [roomId])
+
+  // Connect signaling + build the peer connection only after the user clicks
+  // "Join call" (Instagram-style pre-join gate).
+  useEffect(() => {
+    if (!roomId || !joined) return
+    let disposed = false
 
     const signaling = new Signaling({
       onConnect: async () => {
@@ -131,14 +152,8 @@ export function CallRoom() {
         }
         pendingSignals.current = []
 
-        // Reuse the media we already acquired (so the user keeps the same
-        // preview; no re-prompt / double-acquire).
-        const acq = await mediaPromise
-        if (disposed) {
-          manager.close()
-          return
-        }
-        const stream = await manager.start(acq ?? undefined)
+        // Reuse the media acquired during pre-join (no re-prompt / double-acquire).
+        const stream = await manager.start(mediaRef.current ?? undefined)
         if (disposed) {
           manager.close()
           return
@@ -165,7 +180,6 @@ export function CallRoom() {
 
     return () => {
       disposed = true
-      // Exit native Picture-in-Picture if it's open.
       if (typeof document !== 'undefined' && document.pictureInPictureElement) {
         document.exitPictureInPicture().catch(() => {})
       }
@@ -174,13 +188,12 @@ export function CallRoom() {
       }
       managerRef.current?.close()
       managerRef.current = null
-      if (mediaCleanup) mediaCleanup()
       signaling.disconnect()
       signalingRef.current = null
       pendingSignals.current = []
     }
      
-  }, [roomId])
+  }, [roomId, joined])
 
   // Attach native Picture-in-Picture listeners to the remote <video> so the
   // toolbar reflects real OS PiP state (e.g. when the user closes the floating
@@ -230,14 +243,62 @@ export function CallRoom() {
     signalingRef.current?.leaveRoom()
     router.push('/')
   }
+
+  /** Mic/camera toggles work in BOTH pre-join (no manager yet) and in-call:
+   *  flip the localStream track's `enabled` (the source of truth for what's
+   *  sent) + sync the store. */
   function handleToggleMic() {
-    setMic(managerRef.current?.toggleMic() ?? false)
+    const t = localStreamRef.current?.getAudioTracks()[0]
+    const next = t ? !t.enabled : !micOn
+    if (t) t.enabled = next
+    setMic(next)
   }
   function handleToggleCam() {
-    setCam(managerRef.current?.toggleCam() ?? false)
+    const t = localStreamRef.current?.getVideoTracks()[0]
+    const next = t ? !t.enabled : !camOn
+    if (t) t.enabled = next
+    setCam(next)
   }
   async function handleSwitchCamera() {
     await managerRef.current?.switchCamera()
+  }
+
+  /** Instagram "Join call" — proceed from the pre-join screen into the call. */
+  function handleJoin() {
+    setJoined(true)
+  }
+
+  /** "Test speaker" — play a short audible tone so the user can verify their
+   *  output device before joining. */
+  function handleTestSpeaker() {
+    try {
+      const AC =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext
+      const ac = new AC()
+      const osc = ac.createOscillator()
+      const gain = ac.createGain()
+      gain.gain.value = 0.18
+      osc.frequency.value = 440
+      osc.connect(gain)
+      gain.connect(ac.destination)
+      osc.start()
+      window.setTimeout(() => {
+        try {
+          osc.stop()
+        } catch {
+          /* ignore */
+        }
+        try {
+          ac.close()
+        } catch {
+          /* ignore */
+        }
+      }, 1200)
+    } catch {
+      /* AudioContext unavailable */
+    }
   }
 
   /** "Share your screen" — swap the video sender's track for a display-media
@@ -305,6 +366,24 @@ export function CallRoom() {
   const showFailed = status === 'failed'
   const showEnded = status === 'ended' && !remoteStream
   const requestingMedia = status === 'requesting-media'
+
+  // ---- Pre-join screen (Instagram-style device setup before "Join call") ----
+  if (!joined && !showFailed && !showEnded) {
+    return (
+      <PreJoin
+        localStream={localStream}
+        micOn={micOn}
+        camOn={camOn}
+        roomId={roomId}
+        onToggleMic={handleToggleMic}
+        onToggleCam={handleToggleCam}
+        onTestSpeaker={handleTestSpeaker}
+        onJoin={handleJoin}
+        copied={copied}
+        onCopyLink={copyLink}
+      />
+    )
+  }
 
   // ---- Failed / Ended screens ----
   if (showFailed || showEnded) {

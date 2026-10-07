@@ -32,11 +32,15 @@ export type CallControlsProps = {
 }
 
 /**
- * CallControls — bottom action bar matching the real Instagram VC controls
- * (per a scrape of instagram.com's in-call screen): "Mute microphone",
- * "Turn off video", "Share your screen", "Enter full screen", "End call".
- * Media toggles flip their icon and turn `text-destructive` when OFF.
- * Switch-camera is mobile-only (Instagram desktop doesn't surface it).
+ * CallControls — Instagram-VC in-call control bar (dark-glassy circular).
+ *
+ * Matches the real Instagram VC scrape (ig2) aria-labels exactly:
+ * "Mute microphone", "Turn off video", "Share your screen",
+ * "Enter full screen", "End call". Media toggles flip their icon and turn
+ * red (bg-destructive) when OFF; screen-share & fullscreen turn Instagram
+ * blue (bg-primary) when ON. Switch-camera is mobile-only (sm:hidden),
+ * since Instagram desktop doesn't surface it. The dark-glass overlay
+ * (`bg-black/40 backdrop-blur`) mirrors Instagram's control overlay on video.
  */
 export function CallControls({
   micOn,
@@ -53,7 +57,7 @@ export function CallControls({
   disabled = false,
 }: CallControlsProps) {
   const baseBtn =
-    'size-12 rounded-full bg-card vc-shadow flex items-center justify-center text-foreground transition hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40'
+    'size-12 rounded-full bg-black/40 backdrop-blur flex items-center justify-center text-white transition hover:bg-black/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40'
 
   return (
     <div
@@ -68,9 +72,13 @@ export function CallControls({
         disabled={disabled}
         aria-label={micOn ? 'Mute microphone' : 'Unmute microphone'}
         aria-pressed={!micOn}
-        className={cn(baseBtn, !micOn && 'text-destructive')}
+        className={cn(
+          baseBtn,
+          !micOn &&
+            'bg-destructive text-white hover:bg-destructive hover:opacity-90',
+        )}
       >
-        {micOn ? <Mic className="size-5" /> : <MicOff className="size-5" />}
+        {micOn ? <Mic className="size-6" /> : <MicOff className="size-6" />}
       </button>
 
       {/* Turn off video */}
@@ -80,9 +88,13 @@ export function CallControls({
         disabled={disabled}
         aria-label={camOn ? 'Turn off video' : 'Turn on video'}
         aria-pressed={!camOn}
-        className={cn(baseBtn, !camOn && 'text-destructive')}
+        className={cn(
+          baseBtn,
+          !camOn &&
+            'bg-destructive text-white hover:bg-destructive hover:opacity-90',
+        )}
       >
-        {camOn ? <Video className="size-5" /> : <VideoOff className="size-5" />}
+        {camOn ? <Video className="size-6" /> : <VideoOff className="size-6" />}
       </button>
 
       {/* Share your screen */}
@@ -92,12 +104,16 @@ export function CallControls({
         disabled={disabled}
         aria-label={sharing ? 'Stop sharing' : 'Share your screen'}
         aria-pressed={sharing}
-        className={cn(baseBtn, sharing && 'bg-primary text-primary-foreground')}
+        className={cn(
+          baseBtn,
+          sharing &&
+            'bg-primary text-primary-foreground hover:bg-primary hover:opacity-90',
+        )}
       >
         {sharing ? (
-          <ScreenShareOff className="size-5" />
+          <ScreenShareOff className="size-6" />
         ) : (
-          <ScreenShare className="size-5" />
+          <ScreenShare className="size-6" />
         )}
       </button>
 
@@ -108,12 +124,16 @@ export function CallControls({
         disabled={disabled}
         aria-label={fullscreen ? 'Exit full screen' : 'Enter full screen'}
         aria-pressed={fullscreen}
-        className={cn(baseBtn, fullscreen && 'text-primary')}
+        className={cn(
+          baseBtn,
+          fullscreen &&
+            'bg-primary text-primary-foreground hover:bg-primary hover:opacity-90',
+        )}
       >
         {fullscreen ? (
-          <Minimize2 className="size-5" />
+          <Minimize2 className="size-6" />
         ) : (
-          <Maximize2 className="size-5" />
+          <Maximize2 className="size-6" />
         )}
       </button>
 
@@ -126,7 +146,7 @@ export function CallControls({
           aria-label="Switch camera"
           className={cn(baseBtn, 'sm:hidden')}
         >
-          <SwitchCamera className="size-5" />
+          <SwitchCamera className="size-6" />
         </button>
       )}
 
@@ -137,12 +157,12 @@ export function CallControls({
         disabled={disabled}
         aria-label="End call"
         className={cn(
-          'size-12 rounded-full bg-destructive text-white vc-shadow flex items-center justify-center transition hover:opacity-90',
+          'size-12 rounded-full bg-destructive text-white flex items-center justify-center transition hover:opacity-90',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50',
-          'disabled:pointer-events-none disabled:opacity-40',
+          'disabled:opacity-40',
         )}
       >
-        <PhoneOff className="size-5" />
+        <PhoneOff className="size-6" />
       </button>
     </div>
   )

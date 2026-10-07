@@ -446,3 +446,41 @@ Agent Browser verification:
 
 Stage Summary:
 - Local video now shows instantly on entering the room (camera, or synthetic if denied) regardless of signaling/iframe — directly addresses the "no video at all" in the preview. Remote is full-bleed cover (definite, no collapse, no stretch). 2-peer call still connects.
+
+---
+Task ID: e2-e3
+Agent: full-stack-developer (Instagram PreJoin + CallControls)
+Task: Restyle the 2 VuCall pre-call/in-call components to match the real Instagram VC scrape (dark theme tokens already in globals.css .dark).
+
+Work Log:
+- Read worklog sections `ig-scrape-match` + `fix-no-video` for the real Instagram aria-label contract + VideoTile contract; read globals.css `.dark` theme tokens (--web-wash #1a1a1a, --wash #3e4042, --base-blue #1877f2, --base-cherry #f3425f, deemphasized rgba(255,255,255,0.1)).
+- CREATE `src/components/vc/pre-join.tsx` ('use client'): Instagram pre-join device-setup screen. Root `flex h-[100dvh] w-full flex-col items-center justify-center gap-5 bg-background p-6 text-center`; title `<h1 text-2xl font-bold text-foreground>VuCall</h1>`; local preview `aspect-video w-full max-w-md overflow-hidden rounded-2xl bg-black` wrapping `<VideoTile stream={localStream} objectCover muted mirror aria-label="Your video" />` with a CSS border-spinner placeholder when no stream; "Join call" CTA `w-full max-w-md rounded-xl bg-primary py-3 font-semibold text-primary-foreground` (+ PhoneCall icon); two toggle rows `flex w-full max-w-md items-center justify-between rounded-xl bg-secondary px-4 py-3` with left icon (Mic/MicOff or Video/VideoOff) + label and right shadcn `<Switch checked={micOn|camOn} onCheckedChange={onToggleMic|onToggleCam} aria-label=...>`; "Test speaker" button row with Volume2 icon; room-id + "Salin tautan"/"Tautan disalin" copy-link block (Copy/Check icon). Switch aria-labels reflect the toggle action ("Mute microphone"/"Unmute microphone", "Turn off camera"/"Turn on camera"). Lucide imports: Mic, MicOff, Video, VideoOff, Volume2, Copy, Check, PhoneCall (all used).
+- OVERWRITE `src/components/vc/call-controls.tsx` ('use client'): Instagram in-call dark-glassy circular control bar. Root `role="toolbar" flex w-full max-w-[520px] items-center justify-between gap-2`. Base media button: `size-12 rounded-full bg-black/40 backdrop-blur flex items-center justify-center text-white transition hover:bg-black/60 focus-visible:ring-2 disabled:opacity-40`, white lucide icons at `size-6`. Mic: Mic/MicOff, `bg-destructive text-white` when OFF (red signals muted), aria-label "Mute microphone"/"Unmute microphone", aria-pressed={!micOn}. Cam: Video/VideoOff, red when OFF, aria "Turn off video"/"Turn on video". ScreenShare/ScreenShareOff, `bg-primary text-primary-foreground` when sharing, aria "Share your screen"/"Stop sharing". Maximize2/Minimize2, primary when fullscreen, aria "Enter full screen"/"Exit full screen". SwitchCamera `sm:hidden` (mobile-only) when canSwitchCamera!==false. End call: `size-12 rounded-full bg-destructive text-white` + PhoneOff size-6, aria "End call". Colored states override base hover (`hover:bg-<color>`) so the color persists on hover. Lucide imports: Mic, MicOff, Video, VideoOff, ScreenShare, ScreenShareOff, Maximize2, Minimize2, SwitchCamera, PhoneOff (all used).
+- Wrote work record at `/agent-ctx/e2-e3-fullstack-developer.md` (prop contracts + design notes).
+- No other files touched. No lint/dev run (per instructions).
+
+Stage Summary:
+- Files: `src/components/vc/pre-join.tsx` (CREATE), `src/components/vc/call-controls.tsx` (OVERWRITE).
+- PreJoinProps contract (unchanged/exact): { localStream: MediaStream | null; micOn: boolean; camOn: boolean; roomId: string; onToggleMic; onToggleCam; onTestSpeaker; onJoin; copied: boolean; onCopyLink } — all `() => void`.
+- CallControlsProps contract (unchanged/exact): { micOn; camOn; sharing; fullscreen; onToggleMic; onToggleCam; onToggleScreenShare; onToggleFullscreen; onSwitchCamera; onEnd; canSwitchCamera?: boolean; disabled?: boolean } — all `() => void`.
+- Both components use only semantic theme tokens (bg-background, bg-secondary, bg-primary, text-primary-foreground, text-foreground, text-muted-foreground, bg-destructive, ring-ring) + the allowed `bg-black/40` dark-glass overlay exception for the in-call controls and `bg-black`/`border-white/20` for the PreJoin spinner/preview. All aria-labels/aria-pressed match the real Instagram VC scrape. Ready for the parent page to import.
+
+---
+Task ID: ig-exact
+Agent: main (orchestrator) + subagent (e2-e3)
+Task: Make VuCall match the scraped Instagram VC as closely as possible (pre-join + in-call + dark theme + control labels).
+
+Work Log:
+- Deep-analyzed the user's scraped HTML (ig1 pre-join, ig2 in-call): extracted Instagram's exact dark theme tokens (bg #1a1a1a/--web-wash, surface #3e4042/--wash, border rgba(255,255,255,0.18), blue #1877f2/--base-blue, red #f3425f/--base-cherry), pre-join elements ("Instagram Call", "Join call", "Mute Microphone", "Turn off camera", "Test speaker"), and in-call control aria-labels ("Mute microphone", "Turn off video", "Share your screen", "Enter full screen", "End call", local video "Your video, microphone on").
+- e1 (main): globals.css `.dark` → Instagram-exact tokens (#1a1a1a, #3e4042, #1877f2, #f3425f, rgba borders); layout.tsx defaultTheme=dark.
+- e2-e3 (subagent): built `pre-join.tsx` (Instagram pre-join: VuCall title, local preview, Join call blue CTA, Mute Microphone + Turn off camera switches, Test speaker, room id + copy) and restyled `call-controls.tsx` (Instagram dark-glassy CIRCULAR buttons, white icons, mic/cam red when OFF, screen-share/fullscreen blue when ON, red End call).
+- e4 (main): restructured `call-room.tsx` into a PRE-JOIN GATE — acquire local media on mount (pre-join preview), show PreJoin; "Join call" → connect signaling + manager (reusing the prebuilt media). In-call: dark #1a1a1a, remote full-bleed cover, local PiP "Your video, microphone on/off" (role=button), dark-glassy control bar. Mic/cam toggles flip track.enabled directly (work in BOTH pre-join + in-call). Added handleJoin + handleTestSpeaker (AudioContext 440Hz test tone).
+- CRITICAL FIX: the pre-join gate broke ICE (callee's onicecandidate never fired → no candidates → no connection). Root cause: implicit `setLocalDescription()` (no args) was flaky about triggering ICE gathering in the callee. Fixed by switching offer/answer creation to EXPLICIT `createOffer()/createAnswer()` + `setLocalDescription(sdp)` — reliably starts gathering. Verified: remote video now plays (readyState 4, 640×360) + timer increments in sync.
+
+Agent Browser verification (room DBG3, 2 sessions, 1440px):
+- Pre-join (ig1 replica): VuCall heading, Join call button, "Mute microphone" + "Turn off camera" switches (checked), "Test speaker" button, "Salin tautan" — on dark #1a1a1a bg, local preview bound (640). ✓
+- Click "Join call" → in-call (ig2): dark #1a1a1a, local PiP aria-label "Your video, microphone on", controls exactly match scrape: Mute microphone / Turn off video / Share your screen / Enter full screen / End call (+ Picture-in-Picture, Sembunyikan kamera, Ganti tema). ✓
+- 2-peer P2P CONNECTS after the gate: A remote ready=4 (playing, 640), B remote ready=4, timer 0:10/0:11 incrementing in sync. ✓ No errors. Lint clean, dev server + signaling 200.
+
+Stage Summary:
+- VuCall now mirrors the scraped Instagram VC: Instagram-exact dark theme (#1a1a1a/#1877f2/#3e4042), pre-join device-setup screen (Join call + mic/cam/Test speaker), in-call dark-glassy circular control bar with the exact scrape aria-labels, local tile "Your video, microphone on". Pre-join gate works + 2-peer call connects (ICE fixed via explicit SDP creation). Reconnect/PiP/screen-share/fullscreen/hide-self all intact.
