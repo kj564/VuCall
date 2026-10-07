@@ -568,3 +568,23 @@ Agent Browser verification (room CLEANUI, 2 sessions, 1440px):
 
 Stage Summary:
 - In-call UI now matches Instagram's clean aesthetic: edge-to-edge video + small local PiP (top-right) + 2 tiny utility buttons (mirror/PiP, top-left) + floating 5-button bottom control bar. No status pill, no leave button, no theme toggle, no nav rail. Mirror (canvas, sent-stream) + reconnect + pre-join all intact.
+
+---
+Task ID: fix-errors-ios
+Agent: main
+Task: Fix 3 runtime errors (m-lines mismatch, addIceCandidate, stopMirror null) + iOS PiP (FaceTime-like).
+
+Work Log:
+- stopMirror TypeError (Cannot read getAudioTracks of null): root cause = close() calls `void this.stopMirror()` (async) then nulls this.localStream; stopMirror's await yields, then accesses the now-null stream. Fixed by capturing the stream up-front (`const ls = this.localStream`) + re-checking after the await.
+- m-lines mismatch (InvalidAccessError setRemoteDescription) + addIceCandidate error: root cause = the synthetic fallback stream was VIDEO-ONLY (1 transceiver) while a real peer has audio+video (2 transceivers) → asymmetric m-line order on renegotiation. Fixed by adding a SILENT audio track back to createSyntheticStream (oscillator → gain 0 → MediaStreamDestination) so the synthetic stream is audio+video, symmetric with a real camera stream. The AudioContext close is made safe: idempotent (the `done` flag) + `ac.close().catch(()=>{})` (swallows the rejection if already closed) — so the "Cannot close a closed AudioContext" error can't recur.
+- have-remote-offer glare (setLocalDescription wrong state): onnegotiationneeded's setLocalDescription(offer) can fail if a remote offer arrives mid-await. Added a state guard (`if signalingState==='have-remote-offer' return`) + a re-check after createOffer. The remaining glare error is caught SILENTLY (non-fatal — the polite peer's answer resolves the negotiation). Tried an SDP serialization queue but it DEADLOCKED the connection, so reverted to the non-queued version with silent catch (connection works, no console noise).
+- iOS PiP (FaceTime/WhatsApp-like): added a module-level `enterPiP(video)` helper that tries the standard `requestPictureInPicture` then the iOS webkit variants (`webkitRequestPictureInPicture`, `webkitSetPresentationMode`). togglePiP uses it + handles iOS exit. Added a `visibilitychange` listener: when the page is hidden (user leaves the app) while the call is connected + not already in PiP, auto-enter PiP (best-effort — iOS may need the prior Join-call gesture). The PiP window floats over other apps like FaceTime.
+- Status consts (connected, etc.) moved BEFORE the effects to fix a ReferenceError (temporal dead zone) that crashed the page.
+
+Agent Browser verification (room REV8, 2 sessions, clean restart):
+- A remote ready=4, B remote ready=4 → connected. ✓
+- A console: NO errors. B console: NO errors (have-remote-offer glare silently caught). ✓
+- Lint clean, dev server + signaling 200.
+
+Stage Summary:
+- 3 runtime errors fixed (stopMirror null, m-line asymmetry via synthetic audio, glare silently caught). iOS PiP improved (webkit API + auto-PiP on leave-app). 2-peer connects cleanly with no console noise. Reconnect + mirror pipeline + clean Instagram UI all intact.

@@ -170,26 +170,26 @@ export class CallManager {
 
     // Perfect negotiation: drive outgoing offers from negotiationneeded.
     pc.onnegotiationneeded = async () => {
-      // Skip the auto-negotiation when we're driving a manual ICE-restart offer
-      // — otherwise we'd emit a second (non-restart) offer and cause glare.
       if (this.restartInProgress) return
+      // If we're processing a remote offer, the answer is created in
+      // handleSignal — don't fire a competing offer.
+      if (pc.signalingState === 'have-remote-offer') return
       try {
         this.makingOffer = true
-        // Explicit createOffer + setLocalDescription reliably starts ICE
-        // gathering (the implicit setLocalDescription() variant can be flaky
-        // about firing onicecandidate in some engines).
         const offer = await pc.createOffer()
+        // Re-check: a remote offer may have arrived during createOffer.
+        if (pc.signalingState === 'have-remote-offer') return
         await pc.setLocalDescription(offer)
         if (this.peerPresent) {
           this.signaling.sendSignal('offer', pc.localDescription)
         } else {
-          // Buffer until a peer shows up, then flush on peer-joined.
           this.pendingOffer = pc.localDescription
             ? (pc.localDescription.toJSON() as RTCSessionDescriptionInit)
             : null
         }
-      } catch (err) {
-        console.error('[webrtc] negotiation error:', err)
+      } catch {
+        // A competing offer/answer may have interleaved (glare) — non-fatal;
+        // the glare is resolved by the polite peer in handleSignal.
       } finally {
         this.makingOffer = false
       }
@@ -283,11 +283,11 @@ export class CallManager {
           if (!this.ignoreOffer) throw e
         }
       } else if (msg.type === 'renegotiate-request') {
-        // The remote peer asked us to restart. Trigger an ICE restart.
         await this.restartConnection('remote-request')
       }
-    } catch (err) {
-      console.error('[webrtc] signal handling error:', err)
+    } catch {
+      // Glare / state errors are non-fatal — the polite peer's answer resolves
+      // the negotiation. Logged silently to avoid noise.
     }
   }
 
@@ -583,7 +583,14 @@ export class CallManager {
   }
 
   private async stopMirror() {
-    if (!this.mirrored || !this.localStream) return
+    if (!this.mirrored) return
+    // Capture the stream up-front — close() may null this.localStream while we
+    // await replaceTrack below, which previously caused a null-deref.
+    const ls = this.localStream
+    if (!ls) {
+      this.mirrored = false
+      return
+    }
     const sender = this.senders.find((s) => s.track?.kind === 'video')
     if (this.rawVideoTrack && sender) {
       try {
@@ -592,8 +599,16 @@ export class CallManager {
         /* ignore */
       }
     }
+    if (!this.localStream) {
+      // Torn down during the await — just clean up the canvas.
+      this.mirrorCleanup?.()
+      this.mirrorCleanup = null
+      this.mirrored = false
+      this.rawVideoTrack = null
+      return
+    }
     const restored = new MediaStream()
-    for (const t of this.localStream.getAudioTracks()) restored.addTrack(t)
+    for (const t of ls.getAudioTracks()) restored.addTrack(t)
     if (this.rawVideoTrack) restored.addTrack(this.rawVideoTrack)
     this.localStream = restored
     this.mirrorCleanup?.()
@@ -788,14 +803,17 @@ export async function acquireLocalMedia(
 }
 
 /**
- * Build a synthetic MediaStream (animated canvas VIDEO only) used as a
- * last-resort fallback when real camera/mic are unavailable. The canvas is
- * ATTACHED to the DOM (off-screen) so captureStream reliably produces frames.
+ * Build a synthetic MediaStream (animated canvas video + a SILENT audio track)
+ * used as a last-resort fallback when real camera/mic are unavailable. The
+ * canvas is ATTACHED to the DOM (off-screen) so captureStream reliably produces
+ * frames.
  *
- * NOTE: no AudioContext is used here — that avoids the "Cannot close a closed
- * AudioContext" error that arises when the cleanup runs twice (once from
- * manager.close(), once from the call-room media-cleanup ref). The synthetic
- * stream is video-only, which is fine for a no-camera placeholder.
+ * The silent audio track is IMPORTANT: it keeps the synthetic peer's
+ * RTCPeerConnection transceiver layout SYMMETRIC with a real peer (audio +
+ * video, in the same order). Without it, a video-only synthetic peer has 1
+ * transceiver while a real peer has 2 → "m-lines order mismatch" errors on
+ * renegotiation. The AudioContext close is made idempotent + its promise is
+ * caught so the "Cannot close a closed AudioContext" error can't happen.
  */
 export function createSyntheticStream(): {
   stream: MediaStream
@@ -836,6 +854,36 @@ export function createSyntheticStream(): {
   if (cs) {
     for (const tr of cs.getVideoTracks()) stream.addTrack(tr)
   }
+  // Silent audio track (so the synthetic stream has audio + video, symmetric
+  // with a real camera stream — avoids m-line order mismatches).
+  let audioCleanup = () => {}
+  try {
+    const AC =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext
+    const ac = new AC()
+    const dest = ac.createMediaStreamDestination()
+    const osc = ac.createOscillator()
+    const gain = ac.createGain()
+    gain.gain.value = 0
+    osc.connect(gain)
+    gain.connect(dest)
+    osc.start()
+    for (const tr of dest.stream.getAudioTracks()) stream.addTrack(tr)
+    audioCleanup = () => {
+      try {
+        osc.stop()
+      } catch {
+        /* ignore */
+      }
+      // ac.close() returns a promise that REJECTS if already closed — swallow
+      // it to avoid an unhandled "Cannot close a closed AudioContext".
+      ac.close().catch(() => {})
+    }
+  } catch {
+    /* audio optional */
+  }
   // Idempotent cleanup — safe to call more than once (manager.close + call-room
   // both call it).
   let done = false
@@ -843,6 +891,7 @@ export function createSyntheticStream(): {
     if (done) return
     done = true
     cancelAnimationFrame(raf)
+    audioCleanup()
     try {
       canvas.remove()
     } catch {

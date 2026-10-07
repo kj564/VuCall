@@ -26,6 +26,55 @@ import { CallTimer } from './call-timer'
 import { QualityBars } from './quality-bars'
 import { PreJoin } from './pre-join'
 
+// iOS Safari exposes Picture-in-Picture via webkit-prefixed methods that
+// aren't in the standard lib typings.
+type IOSVideo = HTMLVideoElement & {
+  webkitRequestPictureInPicture?: () => Promise<unknown> | void
+  webkitSetPresentationMode?: (mode: 'picture-in-picture' | 'inline') => void
+  webkitPresentationMode?: string
+  webkitSupportsPictureInPicture?: boolean
+}
+
+/** Enter native Picture-in-Picture on a video, trying the standard API first
+ *  then the iOS webkit variants. Returns true on success. */
+async function enterPiP(v: HTMLVideoElement): Promise<boolean> {
+  const el = v as IOSVideo
+  // Standard API (Chrome/Firefox/desktop Safari).
+  if (
+    typeof document !== 'undefined' &&
+    document.pictureInPictureEnabled &&
+    typeof el.requestPictureInPicture === 'function'
+  ) {
+    try {
+      await el.requestPictureInPicture()
+      return true
+    } catch {
+      /* fall through to webkit */
+    }
+  }
+  // iOS Safari webkit API.
+  if (
+    el.webkitSupportsPictureInPicture &&
+    typeof el.webkitRequestPictureInPicture === 'function'
+  ) {
+    try {
+      await (el.webkitRequestPictureInPicture as () => Promise<unknown>)()
+      return true
+    } catch {
+      /* fall through */
+    }
+  }
+  if (typeof el.webkitSetPresentationMode === 'function') {
+    try {
+      el.webkitSetPresentationMode('picture-in-picture')
+      return true
+    } catch {
+      /* ignore */
+    }
+  }
+  return false
+}
+
 export function CallRoom() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -66,6 +115,15 @@ export function CallRoom() {
     setMirror,
     setFacing,
   } = useVCStore()
+
+  // Derived status flags (declared up-front so the effects below can reference
+  // them without hitting the temporal dead zone).
+  const connected = status === 'connected'
+  const showWaiting = status === 'waiting'
+  const showReconnecting = status === 'reconnecting'
+  const showFailed = status === 'failed'
+  const showEnded = status === 'ended' && !remoteStream
+  const requestingMedia = status === 'requesting-media'
 
   const managerRef = useRef<CallManager | null>(null)
   const signalingRef = useRef<Signaling | null>(null)
@@ -232,8 +290,26 @@ export function CallRoom() {
       setFullscreen(Boolean(document.fullscreenElement))
     document.addEventListener('fullscreenchange', onFsChange)
     return () => document.removeEventListener('fullscreenchange', onFsChange)
-     
   }, [])
+
+  // FaceTime/WhatsApp-style: when the user leaves the app (page hidden) while
+  // the call is connected, auto-enter Picture-in-Picture so the call keeps
+  // floating over other apps. Best-effort (iOS may require a prior gesture,
+  // which the Join-call click provides). On mobile this is the closest a web
+  // app can get to the native "leave app → floating call" behavior.
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const onVis = () => {
+      if (!document.hidden) return
+      if (!connected) return
+      if (document.pictureInPictureElement) return
+      const v = document.querySelector<HTMLVideoElement>('[data-vc="remote"] video')
+      if (v) void enterPiP(v).catch(() => {})
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+     
+  }, [connected])
 
   function handleEnd() {
     if (typeof document !== 'undefined') {
@@ -366,22 +442,26 @@ export function CallRoom() {
   }
 
   /** Real, native Picture-in-Picture on the remote video (OS-level floating
-   *  window that persists across tabs). NOT a fake in-app mini-player. */
+   *  window that persists across tabs/apps — like FaceTime/WhatsApp on iOS).
+   *  Tries the standard API then the iOS webkit variants. */
   async function togglePiP() {
     if (typeof document === 'undefined') return
     try {
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture()
-      } else {
-        const v = document.querySelector<HTMLVideoElement>(
-          '[data-vc="remote"] video',
-        )
-        if (!v) {
-          toast({ title: 'Belum ada video untuk PiP.' })
-          return
-        }
-        await v.requestPictureInPicture()
+        return
       }
+      const v = document.querySelector<HTMLVideoElement>('[data-vc="remote"] video') as IOSVideo | null
+      if (v && v.webkitPresentationMode === 'picture-in-picture' && typeof v.webkitSetPresentationMode === 'function') {
+        v.webkitSetPresentationMode('inline')
+        return
+      }
+      if (!v) {
+        toast({ title: 'Belum ada video untuk PiP.' })
+        return
+      }
+      const ok = await enterPiP(v)
+      if (!ok) toast({ title: 'PiP tidak didukung di browser ini.' })
     } catch {
       toast({ title: 'PiP tidak didukung di browser ini.' })
     }
@@ -396,13 +476,6 @@ export function CallRoom() {
       /* ignore */
     }
   }
-
-  const connected = status === 'connected'
-  const showWaiting = status === 'waiting'
-  const showReconnecting = status === 'reconnecting'
-  const showFailed = status === 'failed'
-  const showEnded = status === 'ended' && !remoteStream
-  const requestingMedia = status === 'requesting-media'
 
   // ---- Pre-join screen (Instagram-style device setup before "Join call") ----
   if (!joined && !showFailed && !showEnded) {
