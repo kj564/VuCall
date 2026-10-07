@@ -290,11 +290,10 @@ export function CallRoom() {
         } catch {
           /* ignore */
         }
-        try {
-          ac.close()
-        } catch {
-          /* ignore */
-        }
+        // ac.close() returns a promise that rejects if already closed —
+        // swallow it to avoid an unhandled "Cannot close a closed
+        // AudioContext" rejection.
+        ac.close().catch(() => {})
       }, 1200)
     } catch {
       /* AudioContext unavailable */
@@ -462,14 +461,13 @@ export function CallRoom() {
           ref={wrapperRef}
           className="video-call-wrapper relative w-full flex-1 overflow-hidden rounded-2xl bg-zinc-950"
         >
-          {/* Remote — full-bleed (fills the area) with object-fit: cover so the
-              peer's video fills the frame with NO distortion/black bars (cover
-              crops, never stretches). A definite-sized container guarantees the
-              video is always visible. */}
+          {/* Remote — full-bleed with object-fit: CONTAIN (Instagram-style):
+              shows the peer's FULL frame (no crop/zoom) with black bars where
+              the aspect ratio differs. No distortion, no over-zoom. */}
           <div data-vc="remote" className="absolute inset-0">
             <VideoTile
               stream={remoteStream}
-              objectCover
+              objectCover={false}
               muted={false}
               aria-label="Remote participant"
               className="h-full w-full"
@@ -514,13 +512,13 @@ export function CallRoom() {
           ) : (
             <div
               data-vc="local"
-              className="absolute right-3 top-3 z-10 aspect-square w-28 overflow-hidden rounded-lg border border-white/20 bg-zinc-950 shadow-lg sm:w-40"
+              className="absolute right-3 top-3 z-10 aspect-video w-40 overflow-hidden rounded-lg border border-white/20 bg-zinc-950 shadow-lg sm:w-52"
             >
               <VideoTile
                 stream={localStream}
                 mirror={!sharing}
                 muted
-                objectCover
+                objectCover={false}
                 aria-label={
                   sharing ? 'Your screen share' : `Your video, microphone ${micOn ? 'on' : 'off'}`
                 }

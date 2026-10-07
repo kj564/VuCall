@@ -645,9 +645,14 @@ export async function acquireLocalMedia(
 }
 
 /**
- * Build a synthetic MediaStream (animated canvas video + silent audio) used as
- * a last-resort fallback when real camera/mic are unavailable. The canvas is
+ * Build a synthetic MediaStream (animated canvas VIDEO only) used as a
+ * last-resort fallback when real camera/mic are unavailable. The canvas is
  * ATTACHED to the DOM (off-screen) so captureStream reliably produces frames.
+ *
+ * NOTE: no AudioContext is used here — that avoids the "Cannot close a closed
+ * AudioContext" error that arises when the cleanup runs twice (once from
+ * manager.close(), once from the call-room media-cleanup ref). The synthetic
+ * stream is video-only, which is fine for a no-camera placeholder.
  */
 export function createSyntheticStream(): {
   stream: MediaStream
@@ -688,39 +693,13 @@ export function createSyntheticStream(): {
   if (cs) {
     for (const tr of cs.getVideoTracks()) stream.addTrack(tr)
   }
-  let audioCleanup = () => {}
-  try {
-    const AC =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext
-    const ac = new AC()
-    const dest = ac.createMediaStreamDestination()
-    const osc = ac.createOscillator()
-    const gain = ac.createGain()
-    gain.gain.value = 0
-    osc.connect(gain)
-    gain.connect(dest)
-    osc.start()
-    for (const tr of dest.stream.getAudioTracks()) stream.addTrack(tr)
-    audioCleanup = () => {
-      try {
-        osc.stop()
-      } catch {
-        /* ignore */
-      }
-      try {
-        ac.close()
-      } catch {
-        /* ignore */
-      }
-    }
-  } catch {
-    /* audio optional */
-  }
+  // Idempotent cleanup — safe to call more than once (manager.close + call-room
+  // both call it).
+  let done = false
   const cleanup = () => {
+    if (done) return
+    done = true
     cancelAnimationFrame(raf)
-    audioCleanup()
     try {
       canvas.remove()
     } catch {

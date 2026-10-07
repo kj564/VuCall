@@ -484,3 +484,23 @@ Agent Browser verification (room DBG3, 2 sessions, 1440px):
 
 Stage Summary:
 - VuCall now mirrors the scraped Instagram VC: Instagram-exact dark theme (#1a1a1a/#1877f2/#3e4042), pre-join device-setup screen (Join call + mic/cam/Test speaker), in-call dark-glassy circular control bar with the exact scrape aria-labels, local tile "Your video, microphone on". Pre-join gate works + 2-peer call connects (ICE fixed via explicit SDP creation). Reconnect/PiP/screen-share/fullscreen/hide-self all intact.
+
+---
+Task ID: fix-zoom-audioctx
+Agent: main (orchestrator)
+Task: Fix "video masih ke zoom" (use object-fit: contain, black bars OK like Instagram) + "Cannot close a closed AudioContext" runtime error.
+
+Work Log:
+- Video zoom: switched remote + local VideoTile from object-fit: cover (crops/zooms) to **contain** (shows the FULL frame with black bars where the aspect differs — exactly like Instagram VC). Local PiP changed from `aspect-square` to `aspect-video` (16:9, matches a webcam so no letterbox in the local tile).
+- AudioContext error root cause: the synthetic stream's `ac.close()` (returns a Promise) was called via `try { ac.close() } catch {}` which does NOT catch the async rejection — and cleanup runs TWICE (manager.close() + call-room mediaCleanupRef, same fn) → the 2nd close() rejects "Cannot close a closed AudioContext" unhandled.
+- Fix 1 (webrtc.ts createSyntheticStream): REMOVED the AudioContext/silent-audio entirely — the synthetic stream is now VIDEO-ONLY (canvas). No AudioContext → no close error. Cleanup made idempotent (a `done` flag) so double-call is safe.
+- Fix 2 (call-room handleTestSpeaker): `ac.close().catch(() => {})` to swallow the rejection if already closed.
+- Lint clean.
+
+Agent Browser verification (room CONTAIN, 2 sessions):
+- Remote: object-fit="contain", videoAR 1.78, containerAR 1.68, readyState=4 (playing). No over-zoom — full frame shown. ✓
+- 2-peer connected: A timer 1:08, B timer 1:08 (in sync), B remote ready=4. ✓
+- No AudioContext errors on either session. ✓ Lint clean, dev server + signaling 200.
+
+Stage Summary:
+- Video is no longer over-zoomed (object-fit: contain, full frame + black bars like Instagram). The "Cannot close a closed AudioContext" runtime error is eliminated (synthetic is video-only; test-speaker close is caught). Pre-join gate + Instagram-dark look + 2-peer connection all still work.
