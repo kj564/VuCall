@@ -386,3 +386,20 @@ Agent Browser verification (room 22B3UN, 2 sessions, 1440px):
 
 Stage Summary:
 - Features removed (chat/reactions/filters/photo). PiP is now REAL native browser/OS PiP (not a fake in-app card). Hide self-view like Instagram. Video is square-cropped via getUserMedia aspectRatio + square CSS container + object-fit:cover (no distortion/black bars). Call + reconnection intact.
+
+---
+Task ID: fix-stretch
+Agent: main (orchestrator)
+Task: Fix "video masih menstreach" — the remote was full-bleed landscape while the capture is square (1:1), so object-fit: cover cropped the square feed into a thin horizontal band (looked stretched/gepeng). The Instagram trick requires the *container* be a forced 1:1 (or portrait), not landscape.
+
+Work Log:
+- Root cause: remote tile was `absolute inset-0` (full-bleed landscape) holding a 1:1 square video → cover cropped to a horizontal band → perceived as stretched. Local tile was already square (fine).
+- Fix (call-room.tsx): remote is now a CENTERED SQUARE tile (`aspect-square max-h-full max-w-full`) inside a flex centering wrapper, with object-cover. Square capture (1:1) + square container (1:1) + cover = ZERO crop, ZERO distortion.
+- Lint clean.
+
+Agent Browser verification (room LDUUBX, 2 sessions, 1440px):
+- Remote video eval: objectFit=cover, containerAR=1.00, renderedAR=1.00, videoAR=1.00 → square in square, no stretch.
+- 2-peer P2P still connected (2 videos each, timer 0:18 in sync), no errors.
+
+Stage Summary:
+- Both remote (centered square) and local (PiP square) tiles now follow the Instagram trick end-to-end: forced 1:1 container + object-fit: cover + square ideal-aspectRatio capture → rapi, simetris, tidak gepeng.

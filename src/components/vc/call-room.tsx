@@ -305,38 +305,46 @@ export function CallRoom() {
       {/* Main: video area + bottom action bar */}
       <main className="app-main flex flex-1 flex-col px-4 pb-4 pt-16 sm:px-8 sm:pt-[72px]">
         <div className="video-call-wrapper relative w-full flex-1 overflow-hidden rounded-2xl bg-zinc-950">
-          {/* Remote (full-bleed, object-cover crops — no distortion/black bars) */}
-          <div data-vc="remote" className="absolute inset-0">
-            <VideoTile
-              stream={remoteStream}
-              objectCover
-              muted={false}
-              aria-label="Remote participant"
-              className="h-full w-full"
-              placeholder={
-                <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-gradient-to-b from-zinc-900 to-black text-center">
-                  <div className="flex size-20 items-center justify-center rounded-full bg-white/10">
-                    {showWaiting ? (
-                      <Share2 className="size-9 text-white/80" />
-                    ) : (
-                      <span className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                    )}
+          {/* Remote — a CENTERED SQUARE tile (forced 1:1 ratio, per the Instagram
+              trick) so the square capture fills it with object-fit: cover and
+              ZERO crop/distortion. (A full-bleed landscape container would
+              crop the square feed into a thin horizontal band — looks stretched.) */}
+          <div className="absolute inset-0 flex items-center justify-center p-3">
+            <div
+              data-vc="remote"
+              className="relative aspect-square max-h-full max-w-full overflow-hidden rounded-2xl bg-zinc-950"
+            >
+              <VideoTile
+                stream={remoteStream}
+                objectCover
+                muted={false}
+                aria-label="Remote participant"
+                className="h-full w-full"
+                placeholder={
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-gradient-to-b from-zinc-900 to-black text-center">
+                    <div className="flex size-20 items-center justify-center rounded-full bg-white/10">
+                      {showWaiting ? (
+                        <Share2 className="size-9 text-white/80" />
+                      ) : (
+                        <span className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                      )}
+                    </div>
+                    <p className="text-sm font-medium text-white/90">
+                      {showWaiting
+                        ? 'Menunggu teman Anda bergabung…'
+                        : requestingMedia
+                          ? 'Menyiapkan kamera & mikrofon…'
+                          : 'Menghubungkan…'}
+                    </p>
                   </div>
-                  <p className="text-sm font-medium text-white/90">
-                    {showWaiting
-                      ? 'Menunggu teman Anda bergabung…'
-                      : requestingMedia
-                        ? 'Menyiapkan kamera & mikrofon…'
-                        : 'Menghubungkan…'}
-                  </p>
-                </div>
-              }
-            />
-            {remoteStream && (
-              <span className="absolute bottom-3 right-3 rounded px-3 py-1 text-xs text-white vc-glass">
-                Teman
-              </span>
-            )}
+                }
+              />
+              {remoteStream && (
+                <span className="absolute bottom-3 right-3 z-10 rounded px-3 py-1 text-xs text-white vc-glass">
+                  Teman
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Local self-view tile: SQUARE container + object-cover (Instagram
