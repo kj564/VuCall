@@ -99,42 +99,17 @@ export class CallManager {
     return this.status
   }
 
-  /** Acquire camera + mic, build the peer connection, and negotiate. */
-  async start(): Promise<MediaStream | null> {
+  /** Acquire camera + mic (or use a pre-acquired stream), build the peer
+   *  connection, and negotiate. Accepting a prebuilt stream lets the UI show
+   *  the local camera immediately on mount, independent of signaling. */
+  async start(prebuilt?: AcquiredMedia): Promise<MediaStream | null> {
     this.setStatus('requesting-media')
-    let stream: MediaStream
-    try {
-      // Instagram-style ideal constraints: ask for a square (1:1) capture at a
-      // modest resolution. Where supported, the browser crops the sensor at the
-      // hardware level before sending — so no pixels are wasted in transit and
-      // the tile can be `object-fit: cover`'d into a square container without
-      // distortion or black bars.
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: this.mediaFacing,
-          width: { ideal: 640 },
-          height: { ideal: 640 },
-          aspectRatio: { ideal: 1.0 },
-        },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      })
-    } catch (e) {
-      // Camera/mic may be blocked or unavailable. Try audio-only first.
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: false,
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        })
-        this.camEnabled = false
-      } catch (e2) {
-        // No real media at all — fall back to a synthetic stream so the call
-        // still establishes (e.g. headless / no-device / denied permission).
-        // The peer will see an animated placeholder instead of black.
-        stream = this.createSyntheticStream()
-        this.camEnabled = true
-        this.usingSynthetic = true
-      }
+    const acq = prebuilt ?? (await acquireLocalMedia(this.mediaFacing))
+    this.usingSynthetic = acq.synthetic
+    if (acq.synthetic && acq.cleanup) {
+      this.syntheticCleanup = acq.cleanup
     }
+    const stream = acq.stream
     this.localStream = stream
     this.micEnabled = true
     this.camEnabled = stream.getVideoTracks().length > 0
@@ -579,83 +554,6 @@ export class CallManager {
     this.handlers.onStatus?.(status, detail)
   }
 
-  /**
-   * Build a synthetic MediaStream (animated canvas video + silent audio) used
-   * as a last-resort fallback when real camera/mic are unavailable. Lets the
-   * call still establish so the peer sees a friendly placeholder instead of
-   * a dead screen — the connection resilience still fully applies.
-   */
-  private createSyntheticStream(): MediaStream {
-    const stream = new MediaStream()
-
-    // --- Video: animated canvas ---
-    const canvas = document.createElement('canvas')
-    // Square canvas matches the 1:1 ideal capture ratio (no distortion when
-    // object-fit: cover'd into a square tile).
-    canvas.width = 640
-    canvas.height = 640
-    const ctx = canvas.getContext('2d')!
-    let raf = 0
-    let t = 0
-    const draw = () => {
-      t += 0.02
-      const g = ctx.createLinearGradient(0, 0, canvas.width, canvas.height)
-      g.addColorStop(0, `hsl(${(t * 30) % 360}, 70%, 45%)`)
-      g.addColorStop(1, `hsl(${(t * 30 + 80) % 360}, 70%, 25%)`)
-      ctx.fillStyle = g
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-      ctx.fillStyle = 'rgba(255,255,255,0.9)'
-      ctx.font = 'bold 38px system-ui, sans-serif'
-      ctx.textAlign = 'center'
-      ctx.fillText('VuCall', canvas.width / 2, canvas.height / 2 - 6)
-      ctx.font = '16px system-ui, sans-serif'
-      ctx.fillStyle = 'rgba(255,255,255,0.7)'
-      ctx.fillText('No camera — synthetic preview', canvas.width / 2, canvas.height / 2 + 28)
-      raf = requestAnimationFrame(draw)
-    }
-    draw()
-    const videoTrack = (canvas as HTMLCanvasElement & {
-      captureStream?: (fps?: number) => MediaStream
-    }).captureStream?.(30)
-    if (videoTrack) {
-      for (const tr of videoTrack.getVideoTracks()) stream.addTrack(tr)
-    }
-
-    // --- Audio: silent oscillator -> gain 0 -> MediaStreamDestination ---
-    try {
-      const AC =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext
-      const ac = new AC()
-      const dest = ac.createMediaStreamDestination()
-      const osc = ac.createOscillator()
-      const gain = ac.createGain()
-      gain.gain.value = 0
-      osc.connect(gain)
-      gain.connect(dest)
-      osc.start()
-      for (const tr of dest.stream.getAudioTracks()) stream.addTrack(tr)
-      this.syntheticCleanup = () => {
-        cancelAnimationFrame(raf)
-        try {
-          osc.stop()
-        } catch {
-          /* ignore */
-        }
-        try {
-          ac.close()
-        } catch {
-          /* ignore */
-        }
-      }
-    } catch {
-      /* audio optional */
-    }
-
-    return stream
-  }
-
   /** End the call and release all resources. */
   close() {
     this.clearReconnect()
@@ -694,4 +592,137 @@ export class CallManager {
     this.peerPresent = false
     this.setStatus('ended')
   }
+}
+
+// Standalone media acquisition (used by call-room to show the local camera
+// immediately on mount, independent of the signaling connection).
+export type AcquiredMedia = {
+  stream: MediaStream
+  synthetic: boolean
+  camEnabled: boolean
+  cleanup: () => void
+}
+
+export async function acquireLocalMedia(
+  facingMode: 'user' | 'environment' = 'user',
+): Promise<AcquiredMedia> {
+  const audioConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: audioConstraints,
+    })
+    return {
+      stream,
+      synthetic: false,
+      camEnabled: stream.getVideoTracks().length > 0,
+      cleanup: () => {},
+    }
+  } catch {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: false,
+        audio: audioConstraints,
+      })
+      return { stream, synthetic: false, camEnabled: false, cleanup: () => {} }
+    } catch {
+      const syn = createSyntheticStream()
+      return {
+        stream: syn.stream,
+        synthetic: true,
+        camEnabled: true,
+        cleanup: syn.cleanup,
+      }
+    }
+  }
+}
+
+/**
+ * Build a synthetic MediaStream (animated canvas video + silent audio) used as
+ * a last-resort fallback when real camera/mic are unavailable. The canvas is
+ * ATTACHED to the DOM (off-screen) so captureStream reliably produces frames.
+ */
+export function createSyntheticStream(): {
+  stream: MediaStream
+  cleanup: () => void
+} {
+  const stream = new MediaStream()
+  const canvas = document.createElement('canvas')
+  canvas.width = 640
+  canvas.height = 360
+  canvas.style.cssText =
+    'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none'
+  document.body.appendChild(canvas)
+  const ctx = canvas.getContext('2d')!
+  let raf = 0
+  let t = 0
+  const draw = () => {
+    t += 0.02
+    const g = ctx.createLinearGradient(0, 0, canvas.width, canvas.height)
+    g.addColorStop(0, `hsl(${(t * 30) % 360}, 70%, 45%)`)
+    g.addColorStop(1, `hsl(${(t * 30 + 80) % 360}, 70%, 25%)`)
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'
+    ctx.font = 'bold 34px system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('VuCall', canvas.width / 2, canvas.height / 2 - 6)
+    ctx.font = '14px system-ui, sans-serif'
+    ctx.fillStyle = 'rgba(255,255,255,0.7)'
+    ctx.fillText('No camera — synthetic preview', canvas.width / 2, canvas.height / 2 + 24)
+    raf = requestAnimationFrame(draw)
+  }
+  draw()
+  const cs = (
+    canvas as HTMLCanvasElement & {
+      captureStream?: (fps?: number) => MediaStream
+    }
+  ).captureStream?.(30)
+  if (cs) {
+    for (const tr of cs.getVideoTracks()) stream.addTrack(tr)
+  }
+  let audioCleanup = () => {}
+  try {
+    const AC =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext
+    const ac = new AC()
+    const dest = ac.createMediaStreamDestination()
+    const osc = ac.createOscillator()
+    const gain = ac.createGain()
+    gain.gain.value = 0
+    osc.connect(gain)
+    gain.connect(dest)
+    osc.start()
+    for (const tr of dest.stream.getAudioTracks()) stream.addTrack(tr)
+    audioCleanup = () => {
+      try {
+        osc.stop()
+      } catch {
+        /* ignore */
+      }
+      try {
+        ac.close()
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* audio optional */
+  }
+  const cleanup = () => {
+    cancelAnimationFrame(raf)
+    audioCleanup()
+    try {
+      canvas.remove()
+    } catch {
+      /* ignore */
+    }
+  }
+  return { stream, cleanup }
 }

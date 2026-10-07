@@ -425,3 +425,24 @@ Agent Browser verification (room IU22IT, 2 sessions, 1440px):
 
 Stage Summary:
 - VuCall's control bar now mirrors the real Instagram VC controls (per the user's scrape): mic / turn-off-video / share-your-screen / enter-full-screen / end-call. Added two real features (screen share via getDisplayMedia+replaceTrack, native fullscreen). Labels + local-video aria-label match Instagram exactly.
+
+---
+Task ID: fix-no-video
+Agent: main (orchestrator)
+Task: Fix "malah tidak muncul vid sama sekali" — video didn't appear at all (preview iframe scenario).
+
+Root cause (most likely):
+- The local video was only acquired INSIDE onConnect (after the signaling socket connected). In the preview iframe, if the iframe blocks the camera (no allow="camera;microphone") AND/OR the signaling socket is slow/blocked, onConnect either never fired or fired after getUserMedia threw → localStream stayed null → no local video. The remote needed a peer (needs signaling) → no remote either. Result: "no video at all."
+- Secondary: the centered-square remote container (`aspect-square max-h-full max-w-full`, no definite base) could collapse to 0 in some browsers.
+
+Fixes:
+- webrtc.ts: extracted standalone `acquireLocalMedia()` + `createSyntheticStream()` (now DOM-attached canvas for reliable frames, 16:9). CallManager.start(prebuilt?) accepts a pre-acquired stream. getUserMedia reverted to 16:9 (1280×720) — matches landscape display, cover = no stretch.
+- call-room.tsx: acquireLocalMedia() called on MOUNT (immediately, independent of signaling) → setLocalStream + setCam right away → the user sees their own camera (or synthetic fallback) instantly even if signaling is slow/blocked. onConnect reuses that already-acquired media (manager.start(acq)) — no re-prompt/double-acquire. Cleanup on unmount. Remote reverted to full-bleed `absolute inset-0` + object-cover (definite size, never collapses, never stretches).
+
+Agent Browser verification:
+- Single session (?room=SOLOTEST, alone): local video hasSrc=true, 640×360, readyState=4, objectFit=cover, tile 160×160 — shows IMMEDIATELY on mount (before any peer/signaling). status "Menunggu".
+- 2-session: A local+remote bound (640), B remote bound (640), timer 0:08 in sync, no errors → P2P still connects with the media-reuse path.
+- Lint clean, dev server 200, signaling 200.
+
+Stage Summary:
+- Local video now shows instantly on entering the room (camera, or synthetic if denied) regardless of signaling/iframe — directly addresses the "no video at all" in the preview. Remote is full-bleed cover (definite, no collapse, no stretch). 2-peer call still connects.

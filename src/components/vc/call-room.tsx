@@ -18,7 +18,7 @@ import {
   Sun,
 } from 'lucide-react'
 import { Signaling, type IncomingSignal } from '@/lib/signaling'
-import { CallManager, type CallStatus } from '@/lib/webrtc'
+import { CallManager, acquireLocalMedia, type CallStatus } from '@/lib/webrtc'
 import { useVCStore } from '@/lib/vc-store'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
@@ -76,6 +76,22 @@ export function CallRoom() {
   useEffect(() => {
     if (!roomId) return
     let disposed = false
+    let mediaCleanup: (() => void) | null = null
+
+    // Acquire the local camera/mic IMMEDIATELY on mount (not waiting for the
+    // signaling socket) so the user always sees their own video right away —
+    // even if the signaling connection is slow or blocked by the iframe. Falls
+    // back to a synthetic stream if the camera is unavailable/denied.
+    const mediaPromise = acquireLocalMedia().then((acq) => {
+      if (disposed) {
+        acq.cleanup()
+        return acq
+      }
+      mediaCleanup = acq.cleanup
+      setLocalStream(acq.stream)
+      setCam(acq.camEnabled)
+      return acq
+    })
 
     const signaling = new Signaling({
       onConnect: async () => {
@@ -115,7 +131,14 @@ export function CallRoom() {
         }
         pendingSignals.current = []
 
-        const stream = await manager.start()
+        // Reuse the media we already acquired (so the user keeps the same
+        // preview; no re-prompt / double-acquire).
+        const acq = await mediaPromise
+        if (disposed) {
+          manager.close()
+          return
+        }
+        const stream = await manager.start(acq ?? undefined)
         if (disposed) {
           manager.close()
           return
@@ -146,8 +169,12 @@ export function CallRoom() {
       if (typeof document !== 'undefined' && document.pictureInPictureElement) {
         document.exitPictureInPicture().catch(() => {})
       }
+      if (typeof document !== 'undefined' && document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {})
+      }
       managerRef.current?.close()
       managerRef.current = null
+      if (mediaCleanup) mediaCleanup()
       signaling.disconnect()
       signalingRef.current = null
       pendingSignals.current = []
@@ -356,46 +383,41 @@ export function CallRoom() {
           ref={wrapperRef}
           className="video-call-wrapper relative w-full flex-1 overflow-hidden rounded-2xl bg-zinc-950"
         >
-          {/* Remote — a CENTERED SQUARE tile (forced 1:1 ratio, per the Instagram
-              trick) so the square capture fills it with object-fit: cover and
-              ZERO crop/distortion. (A full-bleed landscape container would
-              crop the square feed into a thin horizontal band — looks stretched.) */}
-          <div className="absolute inset-0 flex items-center justify-center p-3">
-            <div
-              data-vc="remote"
-              className="relative aspect-square max-h-full max-w-full overflow-hidden rounded-2xl bg-zinc-950"
-            >
-              <VideoTile
-                stream={remoteStream}
-                objectCover
-                muted={false}
-                aria-label="Remote participant"
-                className="h-full w-full"
-                placeholder={
-                  <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-gradient-to-b from-zinc-900 to-black text-center">
-                    <div className="flex size-20 items-center justify-center rounded-full bg-white/10">
-                      {showWaiting ? (
-                        <Share2 className="size-9 text-white/80" />
-                      ) : (
-                        <span className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                      )}
-                    </div>
-                    <p className="text-sm font-medium text-white/90">
-                      {showWaiting
-                        ? 'Menunggu teman Anda bergabung…'
-                        : requestingMedia
-                          ? 'Menyiapkan kamera & mikrofon…'
-                          : 'Menghubungkan…'}
-                    </p>
+          {/* Remote — full-bleed (fills the area) with object-fit: cover so the
+              peer's video fills the frame with NO distortion/black bars (cover
+              crops, never stretches). A definite-sized container guarantees the
+              video is always visible. */}
+          <div data-vc="remote" className="absolute inset-0">
+            <VideoTile
+              stream={remoteStream}
+              objectCover
+              muted={false}
+              aria-label="Remote participant"
+              className="h-full w-full"
+              placeholder={
+                <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-gradient-to-b from-zinc-900 to-black text-center">
+                  <div className="flex size-20 items-center justify-center rounded-full bg-white/10">
+                    {showWaiting ? (
+                      <Share2 className="size-9 text-white/80" />
+                    ) : (
+                      <span className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    )}
                   </div>
-                }
-              />
-              {remoteStream && (
-                <span className="absolute bottom-3 right-3 z-10 rounded px-3 py-1 text-xs text-white vc-glass">
-                  Teman
-                </span>
-              )}
-            </div>
+                  <p className="text-sm font-medium text-white/90">
+                    {showWaiting
+                      ? 'Menunggu teman Anda bergabung…'
+                      : requestingMedia
+                        ? 'Menyiapkan kamera & mikrofon…'
+                        : 'Menghubungkan…'}
+                  </p>
+                </div>
+              }
+            />
+            {remoteStream && (
+              <span className="absolute bottom-3 right-3 z-10 rounded px-3 py-1 text-xs text-white vc-glass">
+                Teman
+              </span>
+            )}
           </div>
 
           {/* Local self-view tile: SQUARE container + object-cover (Instagram
