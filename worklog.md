@@ -320,3 +320,46 @@ Work Log:
 
 Stage Summary:
 - VuCall is back to the clean version (WebRTC 1:1 call + Instagram-VC-style features: chat, reactions, filters, capture, quality, minimize). No Instagram integration remains.
+
+---
+Task ID: u2
+Agent: full-stack-developer (repo restyle)
+Task: Restyle 3 existing VuCall WebRTC components (chat-panel, call-controls, lobby) to match the videocall-app-ui reference design using the tokens already in globals.css.
+
+Work Log:
+- Read worklog.md (vc-1, vc-3, vc-4, f1, f2, f3&f4, revert-ig) + the live globals.css (confirmed tokens --background #eaebf5 / --card #fff / --primary #3d42df / --secondary #f3f4f9 / --muted-foreground #a2a4bc / --destructive #ff1932 / --border #e7e8f0 + dark variants + .vc-shadow/.vc-glass/.scrollbar-thin utilities — did NOT redefine). Confirmed prop contracts: ChatMessage { id, from:'me'|'peer', text, timestamp } @ '@/lib/webrtc'; ChatPanel/CallControls/Lobby prop shapes unchanged. Confirmed call-room.tsx wraps <ChatPanel> in a motion.div (so chat panel must not own width/position) and passes peerName="Teman".
+- Wrote src/components/vc/chat-panel.tsx — 'use client'. Root <aside role="dialog" aria-label="Live chat with {peer}"> h-full w-full bg-card rounded-[10px] flex flex-col overflow-hidden (no width/position). Header p-4 border-b border-border flex justify-between: bg-primary text-primary-foreground "Live Chat" pill (Video icon + label) + ghost X close button (hover:bg-secondary). Messages: scrollbar-thin max-h-full flex-1 overflow-y-auto p-4; each row flex gap-3 py-3 (+flex-row-reverse mine), avatar size-8 rounded-lg bg-secondary text-xs font-bold text-muted-foreground (peer=first letter, me="Me"), content column items-end/items-start with text-xs font-bold name + bubble (peer: rounded-[0_12px_12px_12px] bg-secondary; mine: rounded-[16px_0_16px_16px] bg-primary text-primary-foreground ml-auto) max-w-[calc(100%-32px)] + text-[10px] muted timestamp. Auto-scroll via useRef+useEffect on messages.length. Empty state: centered muted <p> "Belum ada pesan. Sapa temanmu!". Footer p-4 typing area vc-shadow flex gap-2 rounded-[10px] bg-secondary p-2 with plain <input> (flex-1 bg-transparent border-0 outline-none text-sm placeholder:text-muted-foreground, maxLength 1000) + send button size-8 rounded-lg bg-primary text-primary-foreground (disabled when empty). Enter sends (input can't hold newline). Removed framer-motion import — orchestrator's motion.div handles the slide.
+- Wrote src/components/vc/call-controls.tsx — 'use client'. Root role="toolbar" aria-label="Call controls" flex w-full max-w-[500px] items-center justify-between gap-2. Base button: size-12 rounded-lg bg-card vc-shadow flex items-center justify-center text-foreground transition hover:opacity-70 focus-visible:ring-ring disabled:opacity-40. Mic: Mic/MicOff + text-destructive when off + aria-pressed. Cam: Video/VideoOff + text-destructive when off + aria-pressed. Switch: SwitchCamera when canSwitchCamera!==false, aria-label="Switch camera". End call: relative h-12 rounded-lg bg-card vc-shadow px-3 pl-10 text-destructive with PhoneOff absolute left-3 + "Leave" label; focus ring ring-destructive/50. Omits the repo's decorative 100% magnifier (not relevant to 1:1).
+- Wrote src/components/vc/lobby.tsx — 'use client'. Root main flex min-h-[100dvh] w-full items-center justify-center bg-background p-6. Card vc-shadow flex w-full max-w-md flex-col gap-5 rounded-[16px] bg-card p-8. Logo size-12 rounded-xl bg-primary text-primary-foreground + Video icon; wordmark VuCall text-2xl font-bold (Call in text-primary). Subtitle text-sm text-muted-foreground. "Mulai panggilan" bg-primary text-primary-foreground rounded-lg px-4 py-3 font-medium w-full hover:opacity-90. "ATAU" divider (two h-px flex-1 bg-border + muted label). Join form: plain <input> flex-1 rounded-lg border border-transparent bg-secondary px-3 py-3 text-sm outline-none focus:border-primary placeholder:text-muted-foreground (autoCapitalize characters, maxLength 12) + "Gabung" inline-flex gap-1.5 rounded-lg bg-foreground px-4 py-3 text-background with ArrowRight (disabled when empty). 3-item features (Zap/ShieldCheck/Users) with size-9 rounded-lg bg-secondary text-primary chips + text-sm text-muted-foreground. Footer note text-center text-xs text-muted-foreground. Behavior unchanged: genRoomId()→router.push('/?room=ID'); join form→router.push('/?room=${trimmed}').
+- Verified all lucide imports exist (ShieldCheck, SwitchCamera, PhoneOff, Video, Zap, Users, ArrowRight, Send, X, Mic, MicOff, VideoOff). Dev server compiled cleanly after each write (no errors in dev.log). Did NOT run lint/dev per task. Wrote agent-ctx/u2-fullstack-developer.md.
+
+Stage Summary:
+- 3 files restyled (all 'use client', no any, no unused imports, accessible, mobile-first, semantic tokens + .vc-shadow only — no hardcoded hex):
+  - src/components/vc/chat-panel.tsx
+  - src/components/vc/call-controls.tsx
+  - src/components/vc/lobby.tsx
+- Prop contracts unchanged (ChatPanelProps, CallControlsProps, Lobby no-props) so call-room.tsx keeps working without edits.
+- NOTE for orchestrator: chat-panel root is h-full w-full with NO width (per spec — parent sizes). The current motion.div wrapper in call-room.tsx (absolute inset-y-0 right-0 z-30 h-full) has no width, so the chat will render shrink-to-fit until the orchestrator adds a width (e.g. w-[88vw] sm:w-96) to that wrapper. Left untouched per "do NOT touch other files".
+- NOTE: CallControls is now a bare row of white shadowed square buttons (no pill background). The orchestrator's bottom container may want to drop its own pill/background to avoid double-layering. End-call is now a white "Leave" pill with red phone icon + red text (lower visual weight than the old red circle, but clearly destructive via text-destructive #ff1932).
+
+---
+Task ID: u1-u4
+Agent: main (orchestrator) + subagent (u2)
+Task: Restyle VuCall UI to the `videocall-app-ui` repo design, adapted for 1:1.
+
+Work Log:
+- Fetched the repo (HTML + CSS) via raw.githubusercontent.com: index.html, style.css. Identified design: DM Sans font, light app-bg #eaebf5 / dark #262a42, white cards, indigo main-color #3d42df / dark #6f74ff, left vertical nav rail, video-participant tiles (mute/camera top-left, name-tag bottom-right, rgba glass), bottom action bar (48px white square buttons, red Leave), right chat panel (Live Chat header, avatar+name bubbles, typing area), sun/moon theme toggle.
+- u1 (main): rewrote globals.css with repo tokens mapped to shadcn vars (bg-background, bg-card=#fff/#3c3f56, bg-primary=#3d42df/#6f74ff, bg-secondary=#f3f4f9/#2c3046, text-destructive=#ff1932) + .vc-shadow + .vc-glass utilities; layout.tsx → DM Sans font, defaultTheme light.
+- u2 (subagent): restyled chat-panel (Live Chat pill header, avatar+name bubbles, me=primary bubble, typing area), call-controls (repo 48px white square buttons + red Leave), lobby (repo-themed card with indigo accents).
+- u3 (main): rewrote call-room.tsx to repo 3-pane layout adapted 1:1: mode-switch (sun/moon) top-left, left nav rail (Home/Message/Reaction/Capture/Filter icons in white card), main (video-call-wrapper = remote full-bleed tile + local PiP tile, both with vc-glass name-tags + mute/cam style overlays) + bottom CallControls bar, right chat panel (AnimatePresence slide, desktop relative w-400 / mobile overlay), participants avatars (2 for 1:1), expand-btn for mobile. Kept all VC feature wiring (chat/reactions/quality/filter/capture/minimize) + reconnection logic.
+- Fixed: lucide icon imports (X for close, Home, Smile, Sun, Moon), nav buttons got `relative` for badges, FilterMenu repositioned to open rightward (`left-full ml-2 top-0`) + restyled to repo tokens (was dark Instagram-style).
+
+Agent Browser verification (room VGZK7I, both sessions, 1440px):
+- Lobby: repo-styled card (bg #eaebf5, indigo VuCall logo, primary "Mulai panggilan", join input).
+- Call room: theme toggle (light #eaebf5 ↔ dark #262a42 confirmed via getComputedStyle), nav rail (.navigation card present), chat panel ("Live Chat" present), all controls present (Home/Buka pesan/Kirim reaksi/Ambil foto/Efek nav + Mute/camera/Switch/Leave bottom bar + Minimalkan + Ganti tema).
+- 2-peer P2C: both sessions 2 videos (local+remote), timer 0:08 in sync → connected.
+- Chat: A "halo dari repo UI" → signaling `relay chat` → B receives after opening panel.
+- No console errors.
+
+Stage Summary:
+- VuCall now uses the videocall-app-ui reference design (DM Sans, indigo #3d42df, white cards, left nav rail, right chat panel, sun/moon toggle), adapted for 1:1 (remote big tile + local PiP instead of 6-tile grid; 2 participants instead of 6+). All VC features + reconnection intact and verified.

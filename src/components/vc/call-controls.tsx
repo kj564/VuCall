@@ -1,13 +1,12 @@
 'use client'
 
-import * as React from 'react'
 import {
   Mic,
   MicOff,
-  Video,
-  VideoOff,
   PhoneOff,
   SwitchCamera,
+  Video,
+  VideoOff,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -20,18 +19,20 @@ export type CallControlsProps = {
   onToggleCam: () => void
   onSwitchCamera: () => void
   onEnd: () => void
-  /** Hide the switch-camera button when false. Defaults to true. */
+  /** Render the switch-camera button when not false. Defaults to true. */
   canSwitchCamera?: boolean
   /** Disable all buttons (e.g. while not connected). */
   disabled?: boolean
 }
 
 /**
- * CallControls — Instagram-style floating bottom control pill.
+ * CallControls — restyled to the videocall-app-ui bottom action bar.
  *
- * Layout: a row of round icon buttons inside a translucent black pill.
- * Each toggle is `bg-white/10 text-white` when ON and `bg-white text-black`
- * when OFF (muted / cam-off). The end-call button is a larger red circle.
+ * A row of white square (`bg-card`) buttons with the signature `.vc-shadow`.
+ * Media toggles flip their icon and turn `text-destructive` when the
+ * corresponding device is OFF, so the user always knows their media state.
+ * The end-call control is a wider "Leave" pill with a red phone icon — the
+ * only clearly destructive action.
  */
 export function CallControls({
   micOn,
@@ -44,71 +45,68 @@ export function CallControls({
   disabled = false,
 }: CallControlsProps) {
   const baseBtn =
-    'size-12 rounded-full flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:opacity-50 disabled:pointer-events-none'
-
-  // On-state (active mic / active cam): subtle translucent white.
-  // Off-state (muted / cam-off): solid white with black icon — high contrast
-  // so the user always knows their media is off.
-  const micBtn = micOn
-    ? 'bg-white/10 text-white hover:bg-white/20'
-    : 'bg-white text-black hover:bg-white/90'
-  const camBtn = camOn
-    ? 'bg-white/10 text-white hover:bg-white/20'
-    : 'bg-white text-black hover:bg-white/90'
+    'size-12 rounded-lg bg-card vc-shadow flex items-center justify-center text-foreground transition hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40'
 
   return (
     <div
       role="toolbar"
       aria-label="Call controls"
-      className="flex items-center gap-3 rounded-full bg-black/60 p-2 backdrop-blur-md"
+      className="flex w-full max-w-[500px] items-center justify-between gap-2"
     >
+      {/* Microphone toggle */}
       <button
         type="button"
         onClick={onToggleMic}
         disabled={disabled}
         aria-label={micOn ? 'Mute microphone' : 'Unmute microphone'}
         aria-pressed={!micOn}
-        className={cn(baseBtn, micBtn)}
+        className={cn(baseBtn, !micOn && 'text-destructive')}
       >
         {micOn ? <Mic className="size-5" /> : <MicOff className="size-5" />}
       </button>
 
+      {/* Camera toggle */}
       <button
         type="button"
         onClick={onToggleCam}
         disabled={disabled}
         aria-label={camOn ? 'Turn off camera' : 'Turn on camera'}
         aria-pressed={!camOn}
-        className={cn(baseBtn, camBtn)}
+        className={cn(baseBtn, !camOn && 'text-destructive')}
       >
         {camOn ? <Video className="size-5" /> : <VideoOff className="size-5" />}
       </button>
 
-      {canSwitchCamera && (
+      {/* Switch camera (hidden when not supported) */}
+      {canSwitchCamera !== false && (
         <button
           type="button"
           onClick={onSwitchCamera}
           disabled={disabled}
           aria-label="Switch camera"
-          className={cn(baseBtn, 'bg-white/10 text-white hover:bg-white/20')}
+          className={baseBtn}
         >
           <SwitchCamera className="size-5" />
         </button>
       )}
 
+      {/* End call — wider "Leave" pill, red icon + text */}
       <button
         type="button"
         onClick={onEnd}
         disabled={disabled}
-        aria-label="End call"
+        aria-label="Leave call"
         className={cn(
-          'size-14 rounded-full flex items-center justify-center transition-colors',
-          'bg-red-600 text-white hover:bg-red-500',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70',
-          'disabled:opacity-50 disabled:pointer-events-none'
+          'relative flex h-12 items-center gap-2 rounded-lg bg-card px-3 pl-10 text-destructive vc-shadow transition hover:opacity-70',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50',
+          'disabled:pointer-events-none disabled:opacity-40',
         )}
       >
-        <PhoneOff className="size-6" />
+        <PhoneOff
+          className="absolute left-3 top-1/2 size-5 -translate-y-1/2"
+          aria-hidden="true"
+        />
+        <span className="text-sm font-medium">Leave</span>
       </button>
     </div>
   )

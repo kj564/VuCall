@@ -15,22 +15,22 @@ type FilterMenuProps = {
 }
 
 /**
- * FilterMenu — Instagram-style visual filter picker popover. A column of rows,
- * each with a small swatch that previews the filter applied to a colorful
- * gradient, plus the preset label. The active row's swatch gets a red ring
- * and a check icon. Selecting a row calls `onSelect(preset.css)` then
- * `onClose()`.
+ * FilterMenu — visual filter picker popover. A column of rows, each with a
+ * swatch that previews the filter applied to a colorful gradient + the preset
+ * label. The active row gets a primary ring + check. Selecting a row calls
+ * `onSelect(preset.css)` then `onClose()`.
  *
- * Rendered `absolute bottom-full mb-2 right-0` — the parent must be `relative`.
+ * Rendered `absolute left-full top-0 ml-2` — opens to the right of its anchor.
+ * The parent must be `relative`.
  */
 export function FilterMenu({ current, onSelect, onClose }: FilterMenuProps) {
   return (
     <div
       role="menu"
       aria-label="Visual filters"
-      className="absolute bottom-full right-0 z-30 mb-2 w-44 rounded-xl border border-white/10 bg-zinc-950/95 p-2 backdrop-blur-xl"
+      className="absolute left-full top-0 z-30 ml-2 w-44 rounded-xl border border-border bg-card p-2 vc-shadow"
     >
-      <div className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-white/60">
+      <div className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         <Sparkles className="size-3.5" />
         Efek
       </div>
@@ -51,18 +51,16 @@ export function FilterMenu({ current, onSelect, onClose }: FilterMenuProps) {
               }}
               className={cn(
                 'flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left text-sm transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 active
-                  ? 'bg-white/10 text-white'
-                  : 'text-white/80 hover:bg-white/5 hover:text-white',
+                  ? 'bg-secondary text-foreground'
+                  : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
               )}
             >
-              {/* Swatch: a colorful gradient under the filter, so each
-                  preset's visual signature is visible at a glance. */}
               <span
                 aria-hidden
                 className={cn(
-                  'relative block size-7 shrink-0 overflow-hidden rounded-full ring-1 ring-white/15',
+                  'relative block size-7 shrink-0 overflow-hidden rounded-full ring-1 ring-border',
                   active && 'ring-2 ring-primary',
                 )}
               >

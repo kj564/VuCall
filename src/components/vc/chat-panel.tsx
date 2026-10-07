@@ -1,8 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { motion } from 'framer-motion'
-import { Send, X } from 'lucide-react'
+import { Send, Video, X } from 'lucide-react'
 import type { ChatMessage } from '@/lib/webrtc'
 import { cn } from '@/lib/utils'
 
@@ -21,25 +20,19 @@ function formatTime(ts: number): string {
   return `${hh}:${mm}`
 }
 
-/** Derive up to two uppercase initials from a display name. */
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return '?'
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return (parts[0][0]! + parts[parts.length - 1]![0]!).toUpperCase()
-}
-
 /**
- * ChatPanel — Instagram-DM-style slide-in chat panel anchored to the right
- * edge of the viewport. Dark glassy surface, red bubbles for "me", white/10
- * bubbles for the peer, autoscroll to bottom, Enter-to-send / Shift+Enter for
- * newline. Plain `<textarea>` + plain `<button>` (matches the convention used
- * by the existing CallControls component — heavy custom dark styling).
+ * ChatPanel — restyled to the videocall-app-ui reference design.
+ *
+ * A full-height white card (`bg-card`) with a "Live Chat" pill header,
+ * secondary message bubbles for the peer, primary bubbles for "me",
+ * and a `bg-secondary` typing area with a primary send button. The
+ * parent is responsible for sizing/positioning (slide-in wrapper lives
+ * in the call-room orchestrator).
  */
 export function ChatPanel({ messages, onSend, onClose, peerName }: ChatPanelProps) {
   const [text, setText] = React.useState('')
   const scrollRef = React.useRef<HTMLDivElement>(null)
-  const inputRef = React.useRef<HTMLTextAreaElement>(null)
+  const inputRef = React.useRef<HTMLInputElement>(null)
 
   // Auto-scroll to the latest message whenever the list grows.
   React.useEffect(() => {
@@ -55,42 +48,34 @@ export function ChatPanel({ messages, onSend, onClose, peerName }: ChatPanelProp
     inputRef.current?.focus()
   }, [text, onSend])
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Enter sends; an <input> cannot hold a newline, so Shift+Enter is a no-op
+    // here (the repo uses an input too).
+    if (e.key === 'Enter') {
       e.preventDefault()
       handleSend()
     }
   }
 
-  const name = peerName?.trim() || 'Peer'
+  const peerLabel = peerName?.trim() || 'Peer'
 
   return (
-    <motion.aside
-      initial={{ x: '100%' }}
-      animate={{ x: 0 }}
-      exit={{ x: '100%' }}
-      transition={{ type: 'spring', damping: 32, stiffness: 320 }}
+    <aside
       role="dialog"
-      aria-label={`Chat with ${name}`}
-      className="fixed inset-y-0 right-0 z-40 flex h-full w-[88vw] flex-col border-l border-white/10 bg-zinc-950/95 backdrop-blur-xl sm:w-96"
+      aria-label={`Live chat with ${peerLabel}`}
+      className="flex h-full w-full flex-col overflow-hidden rounded-[10px] bg-card"
     >
-      {/* Header */}
-      <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
-        <div
-          aria-hidden
-          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/80 to-primary text-sm font-bold text-primary-foreground"
-        >
-          {initialsOf(name)}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-white">{name}</p>
-          <p className="text-[10px] text-white/50">In-call chat</p>
-        </div>
+      {/* Header — "Live Chat" pill on the left, ghost close on the right */}
+      <header className="flex items-center justify-between border-b border-border p-4">
+        <span className="inline-flex items-center gap-2 rounded bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">
+          <Video className="size-4" aria-hidden="true" />
+          Live Chat
+        </span>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close chat"
-          className="flex size-8 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+          className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <X className="size-5" />
         </button>
@@ -99,67 +84,84 @@ export function ChatPanel({ messages, onSend, onClose, peerName }: ChatPanelProp
       {/* Message list */}
       <div
         ref={scrollRef}
-        className="scrollbar-thin flex-1 space-y-3 overflow-y-auto px-4 py-4"
+        className="scrollbar-thin max-h-full flex-1 overflow-y-auto p-4"
       >
         {messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-            <div className="rounded-full bg-white/5 p-4 text-white/40">
-              <Send className="size-6" />
-            </div>
-            <p className="text-sm text-white/50">Belum ada pesan. Sapa temanmu!</p>
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-muted-foreground">
+              Belum ada pesan. Sapa temanmu!
+            </p>
           </div>
         ) : (
           messages.map((m) => {
             const mine = m.from === 'me'
+            const name = mine ? 'You' : peerLabel
             return (
               <div
                 key={m.id}
-                className={cn('flex flex-col', mine ? 'items-end' : 'items-start')}
+                className={cn('flex gap-3 py-3', mine && 'flex-row-reverse')}
               >
+                {/* Profile picture (initials) */}
+                <div
+                  aria-hidden="true"
+                  className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-secondary text-xs font-bold text-muted-foreground"
+                >
+                  {mine ? 'Me' : (peerLabel[0]?.toUpperCase() ?? '?')}
+                </div>
+
+                {/* Name + bubble + timestamp */}
                 <div
                   className={cn(
-                    'max-w-[85%] whitespace-pre-wrap break-words px-3 py-2 text-sm shadow-sm',
-                    mine
-                      ? 'rounded-2xl rounded-br-sm bg-primary text-primary-foreground'
-                      : 'rounded-2xl rounded-bl-sm bg-white/10 text-white'
+                    'flex min-w-0 flex-1 flex-col',
+                    mine ? 'items-end' : 'items-start',
                   )}
                 >
-                  {m.text}
+                  <p className="text-xs font-bold text-foreground">{name}</p>
+                  <div
+                    className={cn(
+                      'mt-1 max-w-[calc(100%-32px)] px-3 py-1.5 text-xs leading-4',
+                      mine
+                        ? 'ml-auto rounded-[16px_0_16px_16px] bg-primary text-primary-foreground'
+                        : 'rounded-[0_12px_12px_12px] bg-secondary text-foreground',
+                    )}
+                  >
+                    {m.text}
+                  </div>
+                  <span className="mt-1 text-[10px] text-muted-foreground">
+                    {formatTime(m.timestamp)}
+                  </span>
                 </div>
-                <span className="mt-1 px-1 text-[10px] text-white/40">
-                  {formatTime(m.timestamp)}
-                </span>
               </div>
             )
           })
         )}
       </div>
 
-      {/* Composer */}
-      <footer className="border-t border-white/10 bg-zinc-950/80 p-3">
-        <div className="flex items-end gap-2">
-          <textarea
+      {/* Typing area footer */}
+      <footer className="p-4">
+        <div className="vc-shadow flex items-center gap-2 rounded-[10px] bg-secondary p-2">
+          <input
             ref={inputRef}
+            type="text"
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
-            rows={1}
-            placeholder="Tulis pesan…"
+            placeholder="Type your message..."
             aria-label="Type a message"
             maxLength={1000}
-            className="field-sizing-content max-h-24 min-h-10 flex-1 resize-none rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+            className="flex-1 border-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground focus:outline-none"
           />
           <button
             type="button"
             onClick={handleSend}
-            disabled={text.trim().length === 0}
+            disabled={!text.trim()}
             aria-label="Send message"
-            className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:pointer-events-none disabled:opacity-40"
+            className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
           >
             <Send className="size-5" />
           </button>
         </div>
       </footer>
-    </motion.aside>
+    </aside>
   )
 }

@@ -1,0 +1,323 @@
+     1→# YouTube-like Website - Work Log
+     2→
+     3→## Project Overview
+     4→Building a YouTube-like website with Next.js 16, TypeScript, Tailwind 4, shadcn/ui, Prisma (SQLite).
+     5→
+     6→Key constraints:
+     7→- Only `/` page route is user-visible (use URL query params + Zustand for view switching)
+     8→- API routes under `/api/` are allowed
+     9→- Real sample MP4 videos from Google's gtv-videos-bucket for playable videos
+    10→- Picsum seeded images for thumbnails, DiceBear for channel avatars
+    11→- Dark theme by default with red (YouTube) accent
+    12→- Sticky footer required
+    13→
+    14→Architecture:
+    15→- `src/lib/types.ts` - shared TypeScript types
+    16→- `src/lib/store.ts` - Zustand store (view state, search, sidebar)
+    17→- `src/lib/api.ts` - API client functions
+    18→- `src/lib/format.ts` - view count / time formatting helpers
+    19→- `src/components/youtube/*` - feature components (header, sidebar, views)
+    20→- `src/app/page.tsx` - single page that switches views based on URL params
+    21→- `src/app/api/*` - API routes
+    22→
+    23→Views (switched via `?v=ID` watch, `?c=ID` channel, `?q=query` search, default home)
+    24→
+    25→---
+    26→Task ID: 1
+    27→Agent: main (orchestrator)
+    28→Task: Foundation — Prisma schema, seed, shared types/store/api/format/nav, theme + layout
+    29→
+    30→Work Log:
+    31→- Wrote prisma/schema.prisma with Channel, Video, Comment models (relations + indexes)
+    32→- Ran `bun run db:push` — DB in sync, Prisma client generated
+    33→- Wrote prisma/seed.ts with 8 channels + 24 videos (real sample MP4s from gtv-videos-bucket, picsum thumbnails, DiceBear avatars) + 114 comments; ran it successfully
+    34→- Created src/lib/types.ts (Channel, Video, Comment, VideoWithChannel, CATEGORIES)
+    35→- Created src/lib/format.ts (formatCompact/Views/Subscribers/Likes, formatTimeAgo)
+    36→- Created src/lib/store.ts (Zustand: sidebarOpen, searchInput, likedVideos, subscribedChannels, mobileNavOpen)
+    37→- Created src/lib/api.ts (fetchVideos/Video/Channel/Related, likeVideo, subscribeChannel, addComment)
+    38→- Created src/lib/nav.ts (useNav hook: goHome/Watch/Channel/Search/Category via `?v` `?c` `?q` `?cat`)
+    39→- Created src/components/youtube/channel-avatar.tsx (img with initials color fallback)
+    40→- API routes: /api/videos, /api/videos/[id], /api/videos/[id]/like, /api/channels/[id], /api/channels/[id]/subscribe, /api/comments
+    41→- Updated src/app/globals.css: YouTube red primary, dark-first theme, thin scrollbar + line-clamp utilities
+    42→- Updated src/app/layout.tsx: ThemeProvider (defaultTheme dark, no system), metadata for VuTube
+    43→- Lint passes clean
+    44→
+    45→Stage Summary:
+    46→- DB seeded: 8 channels, 24 videos, 114 comments
+    47→- Single user route `/` with view switching via `?v`/`?c`/`?q`/`?cat` query params
+    48→- Contracts ready for frontend subagents: types @ '@/lib/types', store @ '@/lib/store', api @ '@/lib/api', format @ '@/lib/format', nav @ '@/lib/nav', ChannelAvatar @ '@/components/youtube/channel-avatar'
+    49→
+    50→---
+    51→Task ID: 3-b
+    52→Agent: full-stack-developer (home + search views)
+    53→Task: Build the reusable VideoCard, VideoGrid, HomeView (category chips + grid), and SearchView (vertical result list) for VuTube
+    54→
+    55→Work Log:
+    56→- Read worklog.md + existing contracts (types, api, format, nav, channel-avatar) to confirm exact import paths and signatures
+    57→- Wrote src/components/youtube/video-card.tsx — group-hover image scale, duration badge, separate clickable thumbnail/title (goWatch) and avatar/name (goChannel), Film icon onError fallback, BadgeCheck for verified channels
+    58→- Wrote src/components/youtube/video-grid.tsx — plain responsive grid (1 / sm:2 / lg:3 / xl:4) with gap-4 sm:gap-6
+    59→- Wrote src/components/youtube/home-view.tsx — reads ?cat (default All), useEffect fetch via fetchVideos, sticky category chips bar at top-14 with bg-background/95 backdrop-blur + scrollbar-thin, skeleton grid + empty + error states
+    60→- Wrote src/components/youtube/search-view.tsx — reads ?q, useEffect fetch, header "Results for …" with formatCompact count, responsive list (flex-col sm:flex-row rows in 1-col / lg:2-col grid), thumbnail capped at sm:max-w-360px, description line-clamp-3, skeletons + SearchX empty state
+    61→- Wrote agent-ctx/3-b-fullstack-developer.md work record
+    62→
+    63→Stage Summary:
+    64→- 4 files created: video-card.tsx, video-grid.tsx, home-view.tsx, search-view.tsx
+    65→- Used useEffect + useState (NO TanStack Query — no QueryClientProvider in this app)
+    66→- Plain `<img loading=lazy>` with eslint-disable comment (picsum/dicebear not in next.config domains)
+    67→- Title wrapped in div role=button tabIndex=0 + onKeyDown (avoids invalid `<button><h3>` nesting)
+    68→- Channel avatar/name are sibling buttons (no nested-button issues, no stopPropagation needed)
+    69→- All icon-only / image buttons have aria-labels; category chips carry aria-pressed
+    70→- Did NOT run lint/dev (orchestrator will lint after integration)
+    71→
+    72→---
+    73→Task ID: 3-c
+    74→Agent: full-stack-developer (watch + channel views)
+    75→Task: Build the WATCH and CHANNEL views (video player, info, comments, related list, watch-view, channel-view) — 7 client components.
+    76→
+    77→Work Log:
+    78→- Read foundation contracts (types, api, format, store, nav, channel-avatar) — all confirmed present.
+    79→- video-player.tsx: responsive 16:9 container with HTML5 `<video>` (controls, poster, preload=metadata, playsInline). `key={videoUrl}` forces re-mount on navigation.
+    80→- video-info.tsx: title + channel row (avatar/name/verified/sub count) calling `goChannel`; like/dislike pill group with vertical Separator; subscribe button (Bell/BellRing, optimistic store + subscribeChannel + toast); description box (line-clamp-3 + expand, tag chips). Like math: `displayed = base + (likeState==='like' ? 1 : 0)`; on server confirm, `base = res.likes - (newState==='like' ? 1 : 0)` to keep displayed exactly matching the server across all toggle transitions.
+    81→- comments.tsx: header count, composer with Cancel/Comment buttons revealed on focus (Cmd/Ctrl+Enter submits), prepend new Comment locally + toast, per-comment vote toggle with ThumbsUp/Down + Reply.
+    82→- related-video-card.tsx: compact horizontal card (w-40 sm:w-44 thumbnail + duration badge, line-clamp-2 title, channel + views/time); full row clickable to `goWatch`, channel name nested button with stopPropagation → `goChannel`. Exports skeleton too.
+    83→- related-videos.tsx: useEffect fetch + skeleton/error/empty states; vertical list of RelatedVideoCard.
+    84→- watch-view.tsx: reads `?v=`, fetches fetchVideo, two-column flex on xl (main flex-1 min-w-0 + sidebar xl:w-[402px] xl:shrink-0), stacked on smaller screens. Loading skeleton + not-found state with `goHome`.
+    85→- channel-view.tsx: reads `?c=`, fetches fetchChannel. Bleeding banner (aspect 6/1 sm:7/1, no horizontal padding). Avatar 96px in `ring-4 ring-background` circle overlapping banner via `mt-[-48px]`. Name/verified/@handle/subs/video-count/description-with-expand/Subscribe button. Tabs (Videos default, About). Videos tab is a responsive grid of an **inline** ChannelVideoCard (no dependency on Task 3-a's video-card/video-grid). About tab: full description + stats grid (joined/subs/total videos/total views). Skeleton + not-found states.
+    86→
+    87→Stage Summary:
+    88→- Files created (all `'use client'`):
+    89→  - src/components/youtube/video-player.tsx
+    90→  - src/components/youtube/video-info.tsx
+    91→  - src/components/youtube/comments.tsx
+    92→  - src/components/youtube/related-video-card.tsx
+    93→  - src/components/youtube/related-videos.tsx
+    94→  - src/components/youtube/watch-view.tsx
+    95→  - src/components/youtube/channel-view.tsx
+    96→- Channel grid card is inline so channel-view compiles standalone — does not import sibling agent's video-card/video-grid.
+    97→- All optimistic UI flows (like/dislike, subscribe, comment post) call the api client, update the Zustand store optimistically, revert + toast on failure.
+    98→- Plain `<img>` with eslint-disable + `loading="lazy"` for external images; no `any`, no unused imports. Mobile-first responsive throughout.
+    99→
+   100→---
+   101→Task ID: 3-a
+   102→Agent: main (orchestrator) — layout shell
+   103→Task: AppShell, Header, Sidebar, Footer, ThemeToggle, page.tsx integration + lint/runtime fixes
+   104→
+   105→Work Log:
+   106→- Created src/components/youtube/theme-toggle.tsx (next-themes Sun/Moon, mounted guard)
+   107→- Created src/components/youtube/header.tsx: hamburger (toggles sidebar on desktop / opens mobile sheet), red play logo + VuTube wordmark (goHome), desktop search form (rounded, centered) + mobile expandable search overlay, Create / Notifications / ThemeToggle / avatar DropdownMenu
+   108→- Created src/components/youtube/sidebar.tsx: expanded rail (w-60) + collapsed mini rail (w-72px) on desktop, mobile Sheet drawer. Nav sections: main (Home/Shorts/Subs), You (History/Playlists/Your videos/Watch later/Liked), Explore (Trending/Music/Gaming/Sports/Movies/Live/News/Podcasts), More (Settings/Help/Report). Category items call goCategory; Home highlights when not on watch/channel/search.
+   109→- Created src/components/youtube/footer.tsx (sticky mt-auto, slim link row + copyright)
+   110→- Created src/components/youtube/app-shell.tsx: min-h-screen flex-col; Header sticky top-0 h-14; Sidebar sticky top-14; main flex-1 min-h-[calc(100vh-3.5rem)] flex-col with content + Footer (mt-auto) -> sticky footer + natural push on overflow
+   111→- Created src/app/page.tsx: 'use client' Suspense-wrapped ViewRouter reading ?v/?c/?q -> WatchView/ChannelView/SearchView/HomeView, scroll-to-top on view change, skeleton HomeFallback
+   112→- Refactored home-view.tsx & search-view.tsx to a derived-state fetch pattern (key/status/data) to satisfy React 19 react-hooks/set-state-in-effect rule; removed unused eslint-disable img directives; footer.tsx simplified (no mounted state)
+   113→- Fixed runtime: lucide-react exports HelpCircle not Help — updated header.tsx & sidebar.tsx imports/usage. Verified all other lucide icons resolve.
+   114→
+   115→Stage Summary:
+   116→- Layout shell + page integration complete. Lint clean. Dev server: GET / 200, /api/videos returns seeded data.
+   117→- All views wired via URL query params on the single `/` route.
+   118→
+   119→---
+   120→Task ID: 4
+   121→Agent: main (orchestrator) — integration, lint fixes, Agent Browser self-verification
+   122→Task: Wire views in page.tsx, fix lint/runtime bugs, end-to-end verification
+   123→
+   124→Work Log:
+   125→- Created src/app/page.tsx ViewRouter (Suspense-wrapped, reads ?v/?c/?q, scroll-to-top)
+   126→- Ran eslint: 3 errors (React-19 set-state-in-effect in home-view/search-view/footer) + 7 unused eslint-disable img directives. Auto-fixed unused directives via `eslint --fix`. Refactored home-view & search-view to derived-state fetch pattern (key/status/data). Simplified footer (removed mounted state). Lint now clean.
+   127→- Runtime bug: lucide-react has no `Help` export (it's `HelpCircle`) — fixed in header.tsx & sidebar.tsx; verified all other lucide icons resolve.
+   128→- Runtime bug: watch page showed "NaNB subscribers" because VideoWithChannel.channel omitted `subscribers`. Fixed by adding `subscribers` to the channel Pick in types.ts + both API selects (/api/videos + /api/videos/[id]).
+   129→- Agent Browser verification (all passed):
+   130→  * Home renders: header (logo/search/create/notifications/theme/avatar), sidebar (full nav), category chips, 24-video grid
+   131→  * Watch page: HTML5 video with real Google sample MP4 src + picsum poster (playable), title, channel+1.3M subs, like/dislike, share, save, expandable description, comments, related-videos sidebar
+   132→  * Subscribe toggle: optimistic state in Zustand store, persists across navigation (channel page still shows "Subscribed"), toast feedback
+   133→  * Like: registers (count delta too small to show at K precision — correct)
+   134→  * Comment post: appears in DOM + API returns it as first comment authored by "You"
+   135→  * Channel page: banner, avatar, name/@handle/subs, Videos/About tabs, subscribe persists
+   136→  * Search: /?q=pizza → 1 result, "Results for pizza" heading
+   137→  * Category filter: /?cat=Cooking → exactly 3 cooking videos
+   138→  * Theme toggle: dark ↔ light (html class switches)
+   139→  * Mobile (390x844): responsive layout, hamburger opens Sheet drawer
+   140→  * Sticky footer: short page (1 search result) → footerBottom=900=viewport (sticks); long page (24 videos mobile) → footer pushed to 7408px (natural). Both behaviors correct.
+   141→  * No console errors throughout.
+   142→
+   143→Stage Summary:
+   144→- Production-ready YouTube-like site on single `/` route with 4 views (home/watch/channel/search), real playable videos, full interactivity (like/subscribe/comment/search/filter), dark+light themes, responsive + sticky footer. Lint clean, dev server healthy (GET / 200).
+   145→
+   146→---
+   147→Task ID: vc-1
+   148→Agent: main (orchestrator) — video call foundation
+   149→Task: Pivot from YouTube to Instagram-style 1:1 WebRTC video call app. Signaling service + WebRTC lib + store.
+   150→
+   151→Work Log:
+   152→- Honest note to user: bridging into real Instagram call infra is NOT possible (no public API). Building a standalone Instagram-style WebRTC app instead, with aggressive reconnection to solve the "connection lost" pain point.
+   153→- Installed socket.io-client in main project; created mini-services/signaling-service (separate bun project, socket.io on port 3003, path '/', resilient pings). Installed deps, started `bun --hot` in background (signaling.log). Verified reachable via gateway: curl localhost:81/socket.io?...&XTransformPort=3003 -> 200.
+   154→- Created src/lib/signaling.ts: Signaling class wrapping socket.io with auto-reconnect, room:join (ack youAreCaller), rejoin after reconnect, signal relay, peer-joined/left events.
+   155→- Created src/lib/webrtc.ts: CallManager with:
+   156→  * Perfect-negotiation pattern (polite/impolite) for safe (re)negotiation
+   157→  * ICE restart (pc.restartIce + createOffer iceRestart) on failed/disconnected
+   158→  * Buffered initial offer + candidates until peer present (caller side)
+   159→  * Bounded reconnect loop with exponential backoff (max 8 attempts)
+   160→  * Network online/offline listeners -> recovery instead of teardown
+   161→  * Media controls via track.enabled / replaceTrack (no renegotiation needed)
+   162→  * Graceful camera-denied fallback to audio-only
+   163→- Created src/lib/vc-store.ts: Zustand store (roomId, role, status, local/remote streams, micOn/camOn, reconnectAttempt, error, callStartedAt)
+   164→
+   165→Stage Summary:
+   166→- Signaling service running on 3003. Core WebRTC resilience logic in place.
+   167→- Contracts ready for UI: Signaling @ '@/lib/signaling', CallManager (CallStatus) @ '@/lib/webrtc', useVCStore @ '@/lib/vc-store'.
+   168→- Next: presentational VC components (subagent) + call-room orchestrator (main) + page.tsx router.
+   169→
+   170→---
+   171→Task ID: vc-3
+   172→Agent: full-stack-developer (VC presentational UI)
+   173→Task: Build the 5 presentational components for the Instagram-style 1:1 WebRTC call (video-tile, call-controls, reconnecting-overlay, call-timer, lobby).
+   174→
+   175→Work Log:
+   176→- Read worklog.md (especially vc-1) and confirmed contracts: CallStatus @ '@/lib/webrtc', useVCStore @ '@/lib/vc-store', shadcn Button/Input @ '@/components/ui/*', cn @ '@/lib/utils', lucide-react icons (Mic/MicOff/Video/VideoOff/PhoneOff/SwitchCamera/Zap/Shield/Users/ArrowRight).
+   177→- Wrote src/components/vc/video-tile.tsx — 'use client', reusable <video> binding a MediaStream via srcObject + play().catch(()=>{}) in an effect keyed on stream; mirror via scale-x-[-1]; muted default true (with second effect keeping the muted attr in sync); object-cover/contain toggle; renders placeholder when stream null; h-full w-full bg-black.
+   178→- Wrote src/components/vc/call-controls.tsx — 'use client', Instagram-style floating pill (bg-black/60 backdrop-blur-md rounded-full p-2). Round size-12 toggle buttons (mic, cam) that flip between translucent white (ON) and solid white/black (OFF) for high contrast when muted. SwitchCamera button visibility gated by canSwitchCamera (default true). Larger size-14 red (bg-red-600) end-call button with PhoneOff. All buttons carry aria-label + aria-pressed; wrapped in role=toolbar.
+   179→- Wrote src/components/vc/reconnecting-overlay.tsx — 'use client'. Returns null when !visible. When visible, absolute inset-0 z-20 flex items-center justify-center pointer-events-none over a relative parent. Centered translucent panel (bg-black/70 backdrop-blur rounded-2xl px-6 py-5) with an animate-spin border-2 ring spinner, "Reconnecting…" title, attempt-aware subtitle ("Attempt N — keeping the call alive" or "Network unstable — recovering"), optional muted reason line. role=status aria-live=polite.
+   180→- Wrote src/components/vc/call-timer.tsx — 'use client'. 1s setInterval that only runs when running && startedAt != null. formatElapsed => M:SS (or H:MM:SS past 1h). Displays "0:00" when not running. Re-syncs `now` on each mount/dependency change so stale values never flash. Renders an accessible <span aria-label="Call duration">.
+   181→- Wrote src/components/vc/lobby.tsx — 'use client', self-contained, uses useRouter from next/navigation. Centered card on a dark radial-gradient background (oklch(0.22 0 0) -> oklch(0.12 0 0)). Red rounded-square logo with Video icon + "VuCall" wordmark (Call in text-primary). Subtitle in Indonesian. Primary "Mulai panggilan" button (genRoomId = 6-char uppercase alphanumerics) -> router.push(`/?room=${id}`). "atau" divider. Join form (Input + "Gabung" Button) -> router.push(`/?room=${trimmed}`) on submit; disabled when empty; uppercase input + maxLength 12. 3-item features list (Zap/Shield/Users) with circle icons. Footer note about sharing the room link. Fully responsive (max-w-md, py-10).
+   182→- Did NOT run lint/dev (orchestrator will lint after integration).
+   183→- Wrote agent-ctx/vc-3-fullstack-developer.md work record.
+   184→
+   185→Stage Summary:
+   186→- 5 files created (all 'use client', no `any`, no unused imports, accessible):
+   187→  - src/components/vc/video-tile.tsx
+   188→  - src/components/vc/call-controls.tsx
+   189→  - src/components/vc/reconnecting-overlay.tsx
+   190→  - src/components/vc/call-timer.tsx
+   191→  - src/components/vc/lobby.tsx
+   192→- All presentational components are prop-driven (no store coupling) so the call-room orchestrator can compose them freely; the lobby is the only one that owns navigation (useRouter).
+   193→- Brand: red accent (text-primary / bg-primary), NO indigo/blue. Dark gradient backgrounds. Mobile-first.
+   194→- Prop contracts (for orchestrator consumption):
+   195→  * VideoTile: { stream, mirror?, muted?=true, objectCover?=true, className?, placeholder?, 'aria-label'? }
+   196→  * CallControls: { micOn, camOn, onToggleMic, onToggleCam, onSwitchCamera, onEnd, canSwitchCamera?=true, disabled?=false }
+   197→  * ReconnectingOverlay: { visible, attempt?, reason? }  (absolute inset-0; parent must be relative)
+   198→  * CallTimer: { startedAt, running }  (renders <span>)
+   199→  * Lobby: no props (reads nothing, owns useRouter)
+   200→
+   201→---
+   202→Task ID: vc-4
+   203→Agent: main (orchestrator) — VC integration, debugging, self-verification
+   204→Task: Wire call-room orchestrator + page.tsx; debug WebRTC negotiation; Agent Browser self-verification
+   205→
+   206→Work Log:
+   207→- Built src/components/vc/call-room.tsx: orchestrates Signaling + CallManager + store; onConnect→joinRoom→create manager (polite=!caller)→start()→drain pending signals; buffers signals before manager ready; renders remote full-bleed + local PiP + controls + reconnecting overlay + share-link card (waiting) + failed/ended screens.
+   208→- Built src/app/page.tsx: Suspense-wrapped VCRouter (?room= → CallRoom, else Lobby). Updated layout metadata to "VuCall".
+   209→- Added synthetic-media fallback in CallManager (canvas video + silent audio) so calls work even with no camera (headless demo + denied-permission graceful degradation).
+   210→- CRITICAL BUGS FOUND & FIXED via two-session Agent Browser P2P test:
+   211→  1. handleSignal silently dropped the offer when this.pc was null (offer arrived during getUserMedia/setup) → buffered signals inside CallManager + drain after buildPeerConnection.
+   212→  2. ICE-restart glare: manual restartConnection + onnegotiationneeded both emitted offers → added restartInProgress guard to suppress the auto-offer during a manual ICE restart.
+   213→  3. offline listener prematurely flipped status to 'reconnecting' even when ICE stayed connected → made ICE state the source of truth; online listener restores 'connected' if ICE never dropped, only restarts when actually needed.
+   214→  4. Call timer reset on every 'connected' transition → made startCallTimer idempotent (only sets if null).
+   215→- Trimmed verbose per-signal debug logs for production cleanliness; kept ice-state/ontrack/restart/drain diagnostics.
+   216→
+   217→Agent Browser self-verification (all passed):
+   218→- Lobby renders (logo, "Mulai panggilan", join input, features list) — via gateway port 81 (localhost:3000 bypasses Caddy so XTransformPort forwarding needs the gateway).
+   219→- Signaling connects through gateway (?XTransformPort=3003); server logs both peers joining the same room.
+   220→- Two-session P2P WebRTC connection ESTABLISHED: ICE state `connected` on both, remote audio+video tracks flowing both ways (2 videos each with srcObject), call timer counting in sync.
+   221→- Mute toggle works (button label flips Mute↔Unmute).
+   222→- RECONNECTION: simulated `set offline on` (4s) then `set offline off` — the call SURVIVED with no interruption. Timer continued 0:08→0:20 across the network blip; never dropped to "Reconnecting" (ICE stayed connected through the brief outage). This is the core win vs Instagram's "connection lost" auto-drop.
+   223→- End call: A returns to lobby; B shows "Panggilan berakhir — Teman Anda telah meninggalkan panggilan" with back-to-lobby button (peer-leave notification via room:peer-left).
+   224→- No console errors throughout.
+   225→
+   226→Stage Summary:
+   227→- Production-ready 1:1 WebRTC video call (Instagram-style UI) with aggressive reconnection that survives network blips instead of dropping.
+   228→- Single `/` route; views switched via ?room=. Signaling mini-service on port 3003 via gateway.
+   229→- Honest limitation: cannot bridge into real Instagram (no public API) — both peers open the shared web link. Longer network drops (>socket ping timeout) would need userId-based room rejoin + TURN for restrictive NATs (documented in code comments).
+   230→
+   231→---
+   232→Task ID: f1
+   233→Agent: main (orchestrator) — Instagram-feature core
+   234→Task: Add Instagram-VC-style features (our own implementation) on top of the existing VuCall WebRTC app.
+   235→
+   236→Work Log:
+   237→- Extended signaling.ts SignalType: added 'chat' and 'reaction' (relayed via existing dumb-relay signal event).
+   238→- Extended webrtc.ts CallManager:
+   239→  * New types: ChatMessage, Reaction, NetworkQuality (0-4)
+   240→  * New handlers: onChat, onReaction, onQuality
+   241→  * handleSignal now dispatches 'chat'/'reaction' signals to onChat/onReaction
+   242→  * sendChat(text) / sendReaction(emoji) — relay via signaling, also surface locally
+   243→  * emitQuality(iceState) — maps ICE connection state to 0-4 bars, called from oniceconnectionstatechange
+   244→- Extended vc-store.ts:
+   245→  * chatMessages, reactions, localFilter (CSS), networkQuality, chatOpen, minimized, unreadCount
+   246→  * addChat/addReaction/removeReaction/setLocalFilter/setNetworkQuality/setChatOpen/setMinimized
+   247→  * FILTER_PRESETS constant (Normal/Vivid/Warm/Cool/Mono/Vintage/Dreamy) exported for the filter UI
+   248→- Feature set: in-call chat, floating reactions, photo capture, visual filters (local preview), network-quality bars, minimize-to-PiP.
+   249→
+   250→Stage Summary:
+   251→- Core logic + state ready. Contracts: CallManager has sendChat/sendReaction + onChat/onReaction/onQuality; store has chatMessages/reactions/localFilter/networkQuality/minimized; FILTER_PRESETS @ vc-store.
+   252→- Next: presentational components (subagent) + call-room wiring + 2-session browser test.
+   253→
+   254→---
+   255→Task ID: f2
+   256→Agent: full-stack-developer (VC feature components)
+   257→Task: Build 5 Instagram-style presentational components on top of the existing VuCall WebRTC app — chat panel, floating reactions overlay, network quality bars, minimized-to-PiP draggable card, and visual filter menu.
+   258→
+   259→Work Log:
+   260→- Read worklog.md (vc-1, vc-3, vc-4, f1) + the actual contracts in src/lib/webrtc.ts (ChatMessage/Reaction/NetworkQuality types), src/lib/vc-store.ts (FILTER_PRESETS const), src/components/vc/video-tile.tsx (VideoTile props), src/components/vc/call-controls.tsx (style convention — plain <button> + bg-red-600 + aria-* + role=toolbar), src/lib/utils.ts (cn), src/app/globals.css (confirmed `scrollbar-thin` utility). Did NOT touch any file outside the 5 assigned.
+   261→- Wrote src/components/vc/quality-bars.tsx — 'use client', pure display. 4 vertical bars h-[3/5/7/9]px, w-1, gap-0.5, items-end. Color: q0 red-dim/red-dim30, q1 red+white20, q2 amber+white20, q3/q4 emerald+white20. `role=status` + `aria-label="Connection quality: N of 4"` + `title`. No interactivity.
+   262→- Wrote src/components/vc/chat-panel.tsx — 'use client'. motion.aside slides in from x:'100%' → 0 (spring 32/320) + exit:'100%' (so AnimatePresence works if the orchestrator wraps it). Fixed inset-y-0 right-0, w-[88vw] sm:w-96, bg-zinc-950/95 backdrop-blur-xl, border-l white/10, role=dialog + aria-label. Header: gradient avatar (initials from peerName, fallback '?') + name (fallback 'Peer') + 'In-call chat' subtitle + X close button. Body: plain div with scrollbar-thin + overflow-y-auto; auto-scroll to bottom on messages.length change via scrollTop=scrollHeight effect. Empty state: muted Send icon + "Belum ada pesan. Sapa temanmu!". Messages: from='me' → right-aligned bg-primary text-primary-foreground rounded-2xl rounded-br-sm; from='peer' → left-aligned bg-white/10 text-white rounded-2xl rounded-bl-sm; timestamp below (text-[10px] text-white/40, HH:MM). Composer: plain <textarea> rows=1 field-sizing-content max-h-24 + Send button (bg-primary, disabled when text.trim() empty). Enter sends (preventDefault); Shift+Enter inserts newline. maxLength 1000. Plain elements (matching call-controls convention) so the dark Instagram styling overrides cleanly.
+   263→- Wrote src/components/vc/reactions-overlay.tsx — 'use client'. Container: pointer-events-none absolute inset-0 z-20 overflow-hidden aria-hidden. Each reaction rendered by a memoized <ReactionItem> whose per-id randomization (xPct 10–90, drift ±40px, scale 0.85–1.25, stagger 0–0.15s) is derived deterministically from a stable string hash of reaction.id — never re-randomizes on parent re-render. motion.span animates initial {y:'20%', opacity:0, scale:scale*0.6} → animate {y:'-60vh', opacity:[0,1,1,0], x:drift, scale:[scale*0.6, scale*1.1, scale]} over 2.4s ease-out (opacity times [0,0.12,0.75,1]). Removal: one-shot setTimeout(2600 + delay*1000) → onDone(reaction.id), cleared on unmount — no synchronous setState-in-render, no infinite loop.
+   264→- Wrote src/components/vc/filter-menu.tsx — 'use client'. Imports FILTER_PRESETS from '@/lib/vc-store' (per the contract). Container: absolute bottom-full mb-2 right-0 z-30 w-44 rounded-xl border white/10 bg-zinc-950/95 backdrop-blur-xl p-2 (parent must be relative). Header: Sparkles icon + "Efek" label (text-[11px] uppercase). Column of role=menuitemradio buttons (one per preset); each row has a swatch (size-7 rounded-full ring-1 ring-white/15) wrapping a div with `style={{ filter: preset.css }}` over a fixed colorful gradient (red→amber→emerald→sky), so each filter's visual signature is obvious at a glance. Active row (current === preset.css): swatch gets ring-2 ring-primary, row gets bg-white/10, and a Check (text-primary) appears at the right. Clicking a row calls onSelect(preset.css) then onClose().
+   265→- Wrote src/components/vc/minimized-pip.tsx — 'use client'. Fixed-positioned drag card with transform-translate state. Position initialized off-screen ({x:-9999, y:-9999}) + ready=false; useLayoutEffect measures the card on mount via cardRef.offsetWidth/Height and places it bottom-right (window.inner* - size - 16). Reshow via `opacity: ready ? 1 : 0` so no flash at (0,0). Resize listener re-clamps. Drag: pointerdown captures pointer + records start {px,py,ox,oy,w,h}; pointermove applies dx/dy, clamps to viewport with EDGE_GAP=16 on all sides; pointerup/cancel releases capture. The whole card is the drag handle (cursor-grab / cursor-grabbing while dragging). Content: aspect-video remote VideoTile (muted=false) or local fallback + placeholder "No video"; "VuCall" label top-left with pulsing emerald dot (animate-ping); local PiP overlay bottom-right (w-14 h-20 rounded-md, VideoTile mirror muted). Slim control row with onPointerDown stopPropagation so the Maximize2 (onExpand) and red PhoneOff (onEnd) buttons don't start a drag. Uses VideoTile + QualityBars (imports the sibling components just built).
+   266→- Wrote agent-ctx/f2-fullstack-developer.md work record summarizing the above.
+   267→
+   268→Stage Summary:
+   269→- 5 files created (all 'use client', no `any`, no unused imports, accessible, mobile-first):
+   270→  - src/components/vc/quality-bars.tsx
+   271→  - src/components/vc/chat-panel.tsx
+   272→  - src/components/vc/reactions-overlay.tsx
+   273→  - src/components/vc/filter-menu.tsx
+   274→  - src/components/vc/minimized-pip.tsx
+   275→- All prop-driven (no store coupling except filter-menu importing the FILTER_PRESETS const from vc-store, as instructed). The orchestrator can compose them freely.
+   276→- Brand: red accent (bg-primary / text-primary-foreground) for the Send button, "me" chat bubbles, end-call button, active filter ring + check, avatar gradient. NO indigo/blue. Dark glassy surfaces (bg-zinc-950/95, bg-black/60, backdrop-blur).
+   277→- framer-motion used lightly: chat panel slide-in/out, reactions rising. PiP uses plain pointer events (transform state) since framer-motion's transform would clash with the drag-translate style.
+   278→- Prop contracts (for orchestrator consumption):
+   279→  * QualityBars: { quality: NetworkQuality } — pure display, `role=status` inline-flex.
+   280→  * ChatPanel: { messages: ChatMessage[]; onSend: (text: string) => void; onClose: () => void; peerName?: string } — `fixed inset-y-0 right-0`, includes exit animation (wrap in <AnimatePresence> if desired).
+   281→  * ReactionsOverlay: { reactions: Reaction[]; onDone: (id: string) => void } — `absolute inset-0 pointer-events-none`, parent must be relative.
+   282→  * FilterMenu: { current: string; onSelect: (css: string) => void; onClose: () => void } — `absolute bottom-full right-0`, parent must be relative.
+   283→  * MinimizedPip: { localStream: MediaStream|null; remoteStream: MediaStream|null; quality: NetworkQuality; onExpand: () => void; onEnd: () => void } — `position: fixed`, self-contained dragging.
+   284→- Did NOT run lint/dev (orchestrator will lint after integration).
+   285→
+   286→---
+   287→Task ID: f3 & f4
+   288→Agent: main (orchestrator) — feature wiring + verification
+   289→Task: Wire Instagram-VC features into call-room; Agent Browser 2-session verification.
+   290→
+   291→Work Log:
+   292→- Dispatched subagent (f2) for presentational components: chat-panel, reactions-overlay, quality-bars, minimized-pip, filter-menu — all built.
+   293→- Rewrote src/components/vc/call-room.tsx: wired CallManager onChat/onReaction/onQuality → store; added feature control row (chat toggle + unread badge, reaction tray with 5 quick emojis, photo capture, filter toggle) above CallControls; QualityBars in top bar; minimize button in top bar; rendered ChatPanel (AnimatePresence slide), ReactionsOverlay, FilterMenu popover; wrapped local PiP with style.filter; minimized view renders MinimizedPip floating over "Panggilan berlangsung" background; photo capture draws remote video frame → canvas → PNG download + toast.
+   294→- Fixed runtime: lucide has no `Clap` export → simplified reaction tray to plain emoji strings (icons were sr-only anyway).
+   295→- Lint clean (removed one unused eslint-disable via --fix).
+   296→
+   297→Agent Browser 2-session verification (room JS6A94, both connected 0:08, ICE connected):
+   298→- Chat A→B: A typed "halo dari A" → signaling `relay chat from A to B` → opening B's chat panel shows the message. ✓ (bidirectional relay symmetric)
+   299→- Reactions A→B: A tapped ❤️ → floating emoji on A + on B; signaling `relay reaction from A to B`. ✓
+   300→- Filters: opened Efek menu, selected Vintage → local video wrapper style.filter = "sepia(0.6) contrast(0.9) brightness(1.1)". ✓ (note: CSS preview-only; peer sees raw — lite version)
+   301→- Quality bars: aria-label "Connection quality: 4 of 4" when connected. ✓
+   302→- Photo capture: clicked → canvas snapshot of remote video → PNG download triggered, no error. ✓
+   303→- Minimize: clicked → "Panggilan berlangsung" background + draggable MinimizedPip (2 videos: remote+local mini); Expand button returns to full call (timer continues 5:13). ✓
+   304→- No console errors throughout.
+   305→
+   306→Stage Summary:
+   307→- Instagram-VC features (our own implementation) fully working on the Instagram-styled VuCall: in-call chat, floating reactions, photo capture, visual filters, network-quality bars, minimize-to-PiP.
+   308→- The call still survives network blips (reconnection logic unchanged) + now has Instagram-like engagement features.
+   309→- Both peers open the shared web link (Instagram bridge not possible — no API), but the experience mirrors Instagram video call.
+   310→
+   311→---
+   312→Task ID: revert-ig
+   313→Agent: main (orchestrator)
+   314→Task: Revert the Instagram share integration back to clean VuCall.
+   315→
+   316→Work Log:
+   317→- Removed `src/lib/share.ts` (the shareToInstagram helper).
+   318→- call-room.tsx: removed `Instagram` lucide import + `shareToInstagram` import + `handleShareInstagram` handler; reverted top-bar (waiting) back to a single "Salin tautan" button; reverted waiting card back to a single full-width "Salin tautan" button; neutralized the helper text (dropped "lewat Instagram, WhatsApp").
+   319→- Verified: lint clean, dev server 200, browser waiting screen shows only "Salin tautan" (0 Instagram references in call-room).
+   320→
+   321→Stage Summary:
+   322→- VuCall is back to the clean version (WebRTC 1:1 call + Instagram-VC-style features: chat, reactions, filters, capture, quality, minimize). No Instagram integration remains.
+   323→

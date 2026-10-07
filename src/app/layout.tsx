@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { DM_Sans, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/theme-provider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const dmSans = DM_Sans({
+  variable: "--font-dm-sans",
   subsets: ["latin"],
+  weight: ["400", "500", "700"],
 });
 
 const geistMono = Geist_Mono({
@@ -17,7 +18,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "VuCall — 1:1 Video Call yang Tidak Gampang Terputus",
   description:
-    "Aplikasi panggilan video 1:1 bergaya Instagram dengan reconnect otomatis. Bagikan tautan ruangan — teman Anda cukup membukanya.",
+    "Aplikasi panggilan video 1:1 dengan reconnect otomatis. Bagikan tautan ruangan — teman Anda cukup membukanya.",
   keywords: ["VuCall", "video call", "WebRTC", "Next.js", "TypeScript"],
   authors: [{ name: "VuCall" }],
   icons: {
@@ -44,11 +45,11 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
+        className={`${dmSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
+          defaultTheme="light"
           enableSystem={false}
           disableTransitionOnChange
         >

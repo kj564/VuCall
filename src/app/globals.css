@@ -6,7 +6,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-dm-sans);
   --font-mono: var(--font-geist-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -43,75 +43,79 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Theme tokens from the videocall-app-ui reference design.
+   Light is the default; .dark applies the dark variant. */
 :root {
-  --radius: 0.75rem;
-  /* Light theme — YouTube-ish white with red accents */
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.577 0.245 27.325); /* red */
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.45 0 0);
-  --accent: oklch(0.96 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.9 0 0);
-  --input: oklch(0.9 0 0);
-  --ring: oklch(0.577 0.245 27.325);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.577 0.245 27.325);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.95 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.9 0 0);
-  --sidebar-ring: oklch(0.577 0.245 27.325);
+  --radius: 0.625rem;
+  /* Light theme — repo default */
+  --background: #eaebf5;        /* app-background */
+  --foreground: #2c303a;       /* message-text */
+  --card: #ffffff;              /* chat-background / navigation-bg / button-bg */
+  --card-foreground: #2c303a;
+  --popover: #ffffff;
+  --popover-foreground: #2c303a;
+  --primary: #3d42df;          /* main-color */
+  --primary-foreground: #ffffff;
+  --secondary: #f3f4f9;        /* message-bg */
+  --secondary-foreground: #2c303a;
+  --muted: #f3f4f9;
+  --muted-foreground: #a2a4bc;  /* placeholder-text */
+  --accent: #f3f4f9;
+  --accent-foreground: #2c303a;
+  --destructive: #ff1932;      /* endcall red */
+  --border: #e7e8f0;
+  --input: #f3f4f9;
+  --ring: #3d42df;
+  --link: #c0c1c5;            /* link-color (nav icons) */
+  --chart-1: #3d42df;
+  --chart-2: #6f74ff;
+  --chart-3: #a2a4bc;
+  --chart-4: #2c303a;
+  --chart-5: #ff1932;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #2c303a;
+  --sidebar-primary: #3d42df;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f3f4f9;
+  --sidebar-accent-foreground: #2c303a;
+  --sidebar-border: #e7e8f0;
+  --sidebar-ring: #3d42df;
 }
 
 .dark {
-  /* Dark theme — YouTube dark (#0f0f0f) with red accents */
-  --background: oklch(0.12 0 0);       /* #0f0f0f-ish */
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.12 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.62 0.234 27.5);    /* bright red */
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.205 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.205 0 0);
-  --muted-foreground: oklch(0.72 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.62 0.234 27.5);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.16 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.62 0.234 27.5);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.62 0.234 27.5);
+  /* Dark theme — repo dark variant */
+  --background: #262a42;        /* app-background */
+  --foreground: rgba(255, 255, 255, 0.85); /* message-text */
+  --card: #3c3f56;              /* chat-background / navigation-bg / button-bg */
+  --card-foreground: rgba(255, 255, 255, 0.85);
+  --popover: #3c3f56;
+  --popover-foreground: rgba(255, 255, 255, 0.85);
+  --primary: #6f74ff;          /* main-color */
+  --primary-foreground: #ffffff;
+  --secondary: #2c3046;        /* message-bg */
+  --secondary-foreground: rgba(255, 255, 255, 0.8);
+  --muted: #2c3046;
+  --muted-foreground: #ffffff;
+  --accent: #2c3046;
+  --accent-foreground: rgba(255, 255, 255, 0.85);
+  --destructive: #ff1932;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: #2c3046;
+  --ring: #6f74ff;
+  --link: #c0c1c5;
+  --chart-1: #6f74ff;
+  --chart-2: #3d42df;
+  --chart-3: #a2a4bc;
+  --chart-4: #2c303a;
+  --chart-5: #ff1932;
+  --sidebar: #3c3f56;
+  --sidebar-foreground: rgba(255, 255, 255, 0.85);
+  --sidebar-primary: #6f74ff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2c3046;
+  --sidebar-accent-foreground: rgba(255, 255, 255, 0.85);
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #6f74ff;
 }
 
 @layer base {
@@ -120,11 +124,24 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-dm-sans), 'DM Sans', system-ui, sans-serif;
   }
 }
 
-/* Thin, dark scrollbar */
 @layer utilities {
+  /* The reference design's signature soft shadow on white cards. */
+  .vc-shadow {
+    box-shadow: 0 2px 6px 0 rgba(136, 148, 171, 0.2),
+      0 24px 20px -24px rgba(71, 82, 107, 0.1);
+  }
+  .dark .vc-shadow {
+    box-shadow: 0 0 8px 0 rgba(0, 0, 0, 0.35);
+  }
+  /* Dark glass overlay used on video tiles (name tags / action chips). */
+  .vc-glass {
+    background-color: rgba(0, 15, 47, 0.5);
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: var(--muted-foreground) transparent;

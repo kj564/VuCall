@@ -2,9 +2,13 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import { Video, Zap, Shield, Users, ArrowRight } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import {
+  ArrowRight,
+  ShieldCheck,
+  Users,
+  Video,
+  Zap,
+} from 'lucide-react'
 
 /** Generate a 6-char uppercase alphanumeric room id. */
 function genRoomId(): string {
@@ -20,7 +24,7 @@ const FEATURES: { icon: React.ReactNode; text: string }[] = [
     text: 'Reconnect otomatis saat koneksi hilang',
   },
   {
-    icon: <Shield className="size-4" />,
+    icon: <ShieldCheck className="size-4" />,
     text: 'Tanpa drop saat jaringan tidak stabil',
   },
   {
@@ -30,10 +34,12 @@ const FEATURES: { icon: React.ReactNode; text: string }[] = [
 ]
 
 /**
- * Lobby — the landing screen shown when there is no `?room=` query param.
+ * Lobby — landing screen shown when there is no `?room=` query param.
  *
- * Lets the user start a fresh call (generates a random room id and navigates
- * to `/?room=ID`) or join an existing call by pasting a room code.
+ * Restyled to the videocall-app-ui reference: a soft-shadowed white card on
+ * the light app background, indigo logo square, primary CTA, "ATAU" divider,
+ * join row, and a 3-item feature list. Behavior is unchanged — generate a
+ * 6-char room id → `router.push('/?room=ID')`, or paste-join an existing room.
  */
 export function Lobby() {
   const router = useRouter()
@@ -52,39 +58,37 @@ export function Lobby() {
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(ellipse_at_top,_oklch(0.22_0_0),_oklch(0.12_0_0))] p-4">
-      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col items-center justify-center py-10">
+    <main className="flex min-h-[100dvh] w-full items-center justify-center bg-background p-6">
+      <div className="vc-shadow flex w-full max-w-md flex-col gap-5 rounded-[16px] bg-card p-8">
         {/* Logo + wordmark */}
         <div className="flex items-center gap-3">
           <div
             aria-hidden="true"
-            className="flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/30"
+            className="flex size-12 items-center justify-center rounded-xl bg-primary text-primary-foreground"
           >
             <Video className="size-6" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">
+          <h1 className="text-2xl font-bold text-foreground">
             Vu<span className="text-primary">Call</span>
           </h1>
         </div>
 
         {/* Subtitle */}
-        <p className="mt-3 text-center text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Video call 1:1 yang tidak gampang terputus.
         </p>
 
         {/* Primary CTA */}
-        <Button
+        <button
           type="button"
           onClick={startCall}
-          size="lg"
-          className="mt-7 w-full rounded-full px-6 py-3 text-base"
+          className="w-full rounded-lg bg-primary px-4 py-3 font-medium text-primary-foreground transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Mulai panggilan
-          <ArrowRight className="size-4" />
-        </Button>
+        </button>
 
         {/* Divider */}
-        <div className="my-6 flex w-full items-center gap-3">
+        <div className="flex items-center gap-3" aria-hidden="true">
           <span className="h-px flex-1 bg-border" />
           <span className="text-xs uppercase tracking-wider text-muted-foreground">
             atau
@@ -94,7 +98,7 @@ export function Lobby() {
 
         {/* Join form */}
         <form onSubmit={joinCall} className="flex w-full items-center gap-2">
-          <Input
+          <input
             type="text"
             inputMode="text"
             autoComplete="off"
@@ -104,26 +108,27 @@ export function Lobby() {
             onChange={(e) => setCode(e.target.value)}
             placeholder="Kode ruangan"
             aria-label="Kode ruangan"
-            className="flex-1 uppercase placeholder:normal-case"
             maxLength={12}
+            className="flex-1 rounded-lg border border-transparent bg-secondary px-3 py-3 text-sm text-foreground outline-none focus:border-primary placeholder:text-muted-foreground"
           />
-          <Button
+          <button
             type="submit"
-            variant="secondary"
             disabled={!trimmed}
-            className="rounded-full px-5"
+            aria-label="Gabung ruangan"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-foreground px-4 py-3 text-sm font-medium text-background transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
           >
             Gabung
-          </Button>
+            <ArrowRight className="size-4" />
+          </button>
         </form>
 
         {/* Features */}
-        <ul className="mt-9 w-full space-y-3">
+        <ul className="flex flex-col gap-3">
           {FEATURES.map((f) => (
             <li key={f.text} className="flex items-center gap-3">
               <span
                 aria-hidden="true"
-                className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
+                className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary"
               >
                 {f.icon}
               </span>
@@ -133,7 +138,7 @@ export function Lobby() {
         </ul>
 
         {/* Footer note */}
-        <p className="mt-9 text-center text-xs leading-relaxed text-muted-foreground/80">
+        <p className="text-center text-xs text-muted-foreground">
           Bagikan tautan ruangan ke teman Anda. Mereka cukup membuka tautan —
           tidak perlu mendaftar.
         </p>
