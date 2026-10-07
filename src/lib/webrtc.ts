@@ -467,6 +467,10 @@ export class CallManager {
   getMicEnabled() {
     return this.micEnabled
   }
+  /** Current camera facing ('user' = front, 'environment' = back). */
+  getFacing() {
+    return this.mediaFacing
+  }
 
   /** Whether the user is currently sharing their screen instead of the camera. */
   isScreenSharing() {

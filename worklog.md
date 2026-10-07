@@ -504,3 +504,22 @@ Agent Browser verification (room CONTAIN, 2 sessions):
 
 Stage Summary:
 - Video is no longer over-zoomed (object-fit: contain, full frame + black bars like Instagram). The "Cannot close a closed AudioContext" runtime error is eliminated (synthetic is video-only; test-speaker close is caught). Pre-join gate + Instagram-dark look + 2-peer connection all still work.
+
+---
+Task ID: mirror-setting
+Agent: main
+Task: Add a mirror setting for the FRONT camera (default ON like Instagram); back camera stays default (never mirrored).
+
+Work Log:
+- vc-store.ts: added `mirror` (default true) + `facing` ('user'|'environment', default 'user') + setMirror/setFacing (incl. reset).
+- webrtc.ts: added `getFacing()` to CallManager (returns this.mediaFacing).
+- call-room.tsx: handleSwitchCamera now syncs `setFacing(manager.getFacing())`; handleToggleMirror flips the setting; local PiP VideoTile mirror = `facing === 'user' && mirror && !sharing` (front cam + setting + not screen-sharing). Nav rail: new mirror toggle (FlipHorizontal, aria-label, disabled when not front cam). Passed mirror + onToggleMirror to PreJoin.
+- pre-join.tsx: added `mirror` + `onToggleMirror` props + a "Mirror kamera depan" Switch row; preview VideoTile uses mirror={mirror} + object-contain (no zoom).
+
+Agent Browser verification:
+- Pre-join: "Mirror kamera depan" switch present, default checked (ON). Toggle ON→local video "mirrored" (scale-x-[-1]); OFF→"not-mirrored". ✓
+- In-call: nav rail "Aktifkan/Nonaktifkan mirror kamera depan" button (disabled when back cam). Front cam + mirror OFF → local "not-mirrored"; click enable → "mirrored". ✓ Back cam never mirrors (logic gated on facing==='user'). ✓
+- Lint clean, servers 200.
+
+Stage Summary:
+- Mirror setting added: front camera mirrorable (default ON, toggleable in pre-join + in-call nav rail); back camera always default (unmirrored). Logic: mirror = facing==='user' && mirror && !sharing.

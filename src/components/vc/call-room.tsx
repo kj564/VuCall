@@ -9,6 +9,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  FlipHorizontal,
   Home,
   Minimize2,
   Moon,
@@ -52,6 +53,8 @@ export function CallRoom() {
     selfHidden,
     sharing,
     fullscreen,
+    mirror,
+    facing,
     setRoom,
     setStatus,
     setLocalStream,
@@ -66,6 +69,8 @@ export function CallRoom() {
     setSelfHidden,
     setSharing,
     setFullscreen,
+    setMirror,
+    setFacing,
   } = useVCStore()
 
   const managerRef = useRef<CallManager | null>(null)
@@ -261,6 +266,13 @@ export function CallRoom() {
   }
   async function handleSwitchCamera() {
     await managerRef.current?.switchCamera()
+    // Sync the facing so the mirror logic + UI reflect front/back.
+    setFacing(managerRef.current?.getFacing() ?? 'user')
+  }
+
+  /** Toggle the front-camera mirror setting (back camera is never mirrored). */
+  function handleToggleMirror() {
+    setMirror(!mirror)
   }
 
   /** Instagram "Join call" — proceed from the pre-join screen into the call. */
@@ -373,9 +385,11 @@ export function CallRoom() {
         localStream={localStream}
         micOn={micOn}
         camOn={camOn}
+        mirror={mirror}
         roomId={roomId}
         onToggleMic={handleToggleMic}
         onToggleCam={handleToggleCam}
+        onToggleMirror={handleToggleMirror}
         onTestSpeaker={handleTestSpeaker}
         onJoin={handleJoin}
         copied={copied}
@@ -452,6 +466,19 @@ export function CallRoom() {
           >
             {selfHidden ? <EyeOff className="size-6" /> : <Eye className="size-6" />}
           </button>
+
+          {/* Mirror front camera (back camera stays default / unmirrored) */}
+          <button
+            type="button"
+            aria-label={mirror ? 'Nonaktifkan mirror kamera depan' : 'Aktifkan mirror kamera depan'}
+            aria-pressed={mirror}
+            title="Mirror kamera depan"
+            className={cn(navBtn, mirror && facing === 'user' && 'text-primary')}
+            onClick={handleToggleMirror}
+            disabled={facing !== 'user'}
+          >
+            <FlipHorizontal className="size-6" />
+          </button>
         </nav>
       </aside>
 
@@ -516,7 +543,7 @@ export function CallRoom() {
             >
               <VideoTile
                 stream={localStream}
-                mirror={!sharing}
+                mirror={facing === 'user' && mirror && !sharing}
                 muted
                 objectCover={false}
                 aria-label={

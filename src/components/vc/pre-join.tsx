@@ -3,6 +3,7 @@
 import {
   Check,
   Copy,
+  FlipHorizontal,
   Mic,
   MicOff,
   PhoneCall,
@@ -18,9 +19,11 @@ export type PreJoinProps = {
   localStream: MediaStream | null
   micOn: boolean
   camOn: boolean
+  mirror: boolean
   roomId: string
   onToggleMic: () => void
   onToggleCam: () => void
+  onToggleMirror: () => void
   onTestSpeaker: () => void
   onJoin: () => void
   copied: boolean
@@ -39,9 +42,11 @@ export function PreJoin({
   localStream,
   micOn,
   camOn,
+  mirror,
   roomId,
   onToggleMic,
   onToggleCam,
+  onToggleMirror,
   onTestSpeaker,
   onJoin,
   copied,
@@ -51,13 +56,14 @@ export function PreJoin({
     <main className="flex h-[100dvh] w-full flex-col items-center justify-center gap-5 bg-background p-6 text-center">
       <h1 className="text-2xl font-bold text-foreground">VuCall</h1>
 
-      {/* Local preview tile (mirrored + muted; placeholder spinner while no stream) */}
+      {/* Local preview tile (mirrored per the setting; object-contain so the full
+          frame shows with black bars — no over-zoom; placeholder while loading) */}
       <div className="aspect-video w-full max-w-md overflow-hidden rounded-2xl bg-black">
         <VideoTile
           stream={localStream}
-          objectCover
+          objectCover={false}
           muted
-          mirror
+          mirror={mirror}
           aria-label="Your video"
           placeholder={
             <div className="flex h-full w-full items-center justify-center bg-black">
@@ -124,6 +130,19 @@ export function PreJoin({
         <Volume2 className="size-5" aria-hidden="true" />
         <span className="text-sm font-medium">Test speaker</span>
       </button>
+
+      {/* Mirror front-camera toggle row (back camera is never mirrored) */}
+      <div className="flex w-full max-w-md items-center justify-between rounded-xl bg-secondary px-4 py-3">
+        <span className="flex items-center gap-3 text-foreground">
+          <FlipHorizontal className="size-5" aria-hidden="true" />
+          <span className="text-sm font-medium">Mirror kamera depan</span>
+        </span>
+        <Switch
+          checked={mirror}
+          onCheckedChange={onToggleMirror}
+          aria-label={mirror ? 'Nonaktifkan mirror kamera depan' : 'Aktifkan mirror kamera depan'}
+        />
+      </div>
 
       {/* Room id + copy link */}
       <div className="mt-2 flex w-full max-w-md flex-col items-center gap-1.5">
