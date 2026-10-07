@@ -2,23 +2,43 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, Check, Copy, PhoneOff, Share2 } from 'lucide-react'
+import { AnimatePresence, motion } from 'framer-motion'
+import {
+  ArrowLeft,
+  Camera,
+  Check,
+  Copy,
+  Heart,
+  Minimize2,
+  MessageCircle,
+  PhoneOff,
+  Share2,
+  Sparkles,
+} from 'lucide-react'
 import { Signaling, type IncomingSignal } from '@/lib/signaling'
 import { CallManager, type CallStatus } from '@/lib/webrtc'
 import { useVCStore } from '@/lib/vc-store'
 import { Button } from '@/components/ui/button'
+import { useToast } from '@/hooks/use-toast'
+import { cn } from '@/lib/utils'
 import { VideoTile } from './video-tile'
 import { CallControls } from './call-controls'
 import { ReconnectingOverlay } from './reconnecting-overlay'
 import { CallTimer } from './call-timer'
-import { cn } from '@/lib/utils'
+import { ChatPanel } from './chat-panel'
+import { ReactionsOverlay } from './reactions-overlay'
+import { QualityBars } from './quality-bars'
+import { MinimizedPip } from './minimized-pip'
+import { FilterMenu } from './filter-menu'
+
+const QUICK_REACTIONS = ['❤️', '👍', '😂', '🔥', '👏']
 
 export function CallRoom() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const roomId = searchParams.get('room') || ''
+  const { toast } = useToast()
 
-  const store = useVCStore()
   const {
     status,
     statusDetail,
@@ -29,6 +49,13 @@ export function CallRoom() {
     reconnectAttempt,
     error,
     callStartedAt,
+    chatMessages,
+    reactions,
+    localFilter,
+    networkQuality,
+    chatOpen,
+    minimized,
+    unreadCount,
     setRoom,
     setStatus,
     setLocalStream,
@@ -38,12 +65,21 @@ export function CallRoom() {
     setReconnectAttempt,
     setError,
     startCallTimer,
-  } = store
+    addChat,
+    addReaction,
+    removeReaction,
+    setLocalFilter,
+    setNetworkQuality,
+    setChatOpen,
+    setMinimized,
+  } = useVCStore()
 
   const managerRef = useRef<CallManager | null>(null)
   const signalingRef = useRef<Signaling | null>(null)
   const pendingSignals = useRef<IncomingSignal[]>([])
   const [copied, setCopied] = useState(false)
+  const [reactionTrayOpen, setReactionTrayOpen] = useState(false)
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false)
 
   useEffect(() => {
     if (!roomId) return
@@ -79,11 +115,19 @@ export function CallRoom() {
             onError: (m: string) => {
               if (!disposed) setError(m)
             },
+            onChat: (m) => {
+              if (!disposed) addChat(m)
+            },
+            onReaction: (r) => {
+              if (!disposed) addReaction(r)
+            },
+            onQuality: (q) => {
+              if (!disposed) setNetworkQuality(q)
+            },
           },
         )
         managerRef.current = manager
 
-        // Drain any signals that arrived before the manager was ready.
         for (const m of pendingSignals.current) {
           void manager.handleSignal(m)
         }
@@ -101,7 +145,6 @@ export function CallRoom() {
         managerRef.current?.onPeerLeft()
       },
       onSignal: (msg: IncomingSignal) => {
-        // Buffer if manager not ready yet, else dispatch immediately.
         if (managerRef.current) {
           void managerRef.current.handleSignal(msg)
         } else {
@@ -133,19 +176,53 @@ export function CallRoom() {
     signalingRef.current?.leaveRoom()
     router.push('/')
   }
-
   function handleToggleMic() {
-    const on = managerRef.current?.toggleMic() ?? false
-    setMic(on)
+    setMic(managerRef.current?.toggleMic() ?? false)
   }
   function handleToggleCam() {
-    const on = managerRef.current?.toggleCam() ?? false
-    setCam(on)
+    setCam(managerRef.current?.toggleCam() ?? false)
   }
   async function handleSwitchCamera() {
     await managerRef.current?.switchCamera()
   }
-
+  function handleSendChat(text: string) {
+    managerRef.current?.sendChat(text)
+  }
+  function handleReaction(emoji: string) {
+    managerRef.current?.sendReaction(emoji)
+    setReactionTrayOpen(false)
+  }
+  function handleSelectFilter(css: string) {
+    setLocalFilter(css)
+    setFilterMenuOpen(false)
+  }
+  function handleCapture() {
+    const video = document.querySelector<HTMLVideoElement>(
+      '[data-vc="remote"] video',
+    )
+    if (!video || !video.videoWidth) {
+      toast({ title: 'Belum ada video untuk difoto.' })
+      return
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(video, 0, 0)
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `vucall-${roomId}-${Date.now()}.png`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast({ title: 'Foto tersimpan', description: 'Snapshot panggilan diunduh.' })
+    }, 'image/png')
+  }
   async function copyLink() {
     try {
       await navigator.clipboard.writeText(window.location.href)
@@ -188,35 +265,63 @@ export function CallRoom() {
     )
   }
 
-  // ---- Active call screen (requesting / waiting / connecting / connected / reconnecting) ----
+  // ---- Minimized: floating PiP over a quiet background ----
+  if (minimized) {
+    return (
+      <div className="relative flex h-[100dvh] w-full flex-col items-center justify-center gap-3 bg-zinc-950 text-center">
+        <p className="text-lg font-semibold text-white/90">Panggilan berlangsung</p>
+        <p className="max-w-xs text-sm text-white/50">
+          Geser pip untuk memindahkan. Ketuk perbesar untuk kembali ke layar penuh.
+        </p>
+        <p className="font-mono uppercase tracking-wider text-white/40">{roomId}</p>
+        <MinimizedPip
+          localStream={localStream}
+          remoteStream={remoteStream}
+          quality={networkQuality}
+          onExpand={() => setMinimized(false)}
+          onEnd={handleEnd}
+        />
+      </div>
+    )
+  }
+
+  // ---- Active call screen ----
+  const featureBtn =
+    'flex size-11 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden bg-black">
       {/* Remote video (full-bleed) */}
-      <VideoTile
-        stream={remoteStream}
-        objectCover
-        muted={false}
-        aria-label="Remote participant"
-        className="h-full w-full"
-        placeholder={
-          <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-gradient-to-b from-zinc-900 to-black text-center">
-            <div className="flex size-20 items-center justify-center rounded-full bg-white/10">
-              {showWaiting ? (
-                <Share2 className="size-9 text-white/80" />
-              ) : (
-                <span className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-              )}
+      <div data-vc="remote" className="absolute inset-0 h-full w-full">
+        <VideoTile
+          stream={remoteStream}
+          objectCover
+          muted={false}
+          aria-label="Remote participant"
+          className="h-full w-full"
+          placeholder={
+            <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-gradient-to-b from-zinc-900 to-black text-center">
+              <div className="flex size-20 items-center justify-center rounded-full bg-white/10">
+                {showWaiting ? (
+                  <Share2 className="size-9 text-white/80" />
+                ) : (
+                  <span className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                )}
+              </div>
+              <p className="text-sm font-medium text-white/90">
+                {showWaiting
+                  ? 'Menunggu teman Anda bergabung…'
+                  : requestingMedia
+                    ? 'Menyiapkan kamera & mikrofon…'
+                    : 'Menghubungkan…'}
+              </p>
             </div>
-            <p className="text-sm font-medium text-white/90">
-              {showWaiting
-                ? 'Menunggu teman Anda bergabung…'
-                : requestingMedia
-                  ? 'Menyiapkan kamera & mikrofon…'
-                  : 'Menghubungkan…'}
-            </p>
-          </div>
-        }
-      />
+          }
+        />
+      </div>
+
+      {/* Reactions float over everything */}
+      <ReactionsOverlay reactions={reactions} onDone={removeReaction} />
 
       {/* Top status bar */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/70 to-transparent p-4">
@@ -247,6 +352,7 @@ export function CallRoom() {
               />
               <CallTimer startedAt={connected ? callStartedAt : null} running={connected} />
               <span className="text-white/50">·</span>
+              <QualityBars quality={networkQuality} />
               <span className="font-mono uppercase tracking-wider">{roomId}</span>
             </span>
           </div>
@@ -258,15 +364,19 @@ export function CallRoom() {
                 onClick={copyLink}
                 className="gap-1.5 rounded-full bg-black/40 text-white hover:bg-black/60"
               >
-                {copied ? (
-                  <Check className="size-4" />
-                ) : (
-                  <Copy className="size-4" />
-                )}
+                {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
                 {copied ? 'Tautan disalin' : 'Salin tautan'}
               </Button>
             ) : (
-              <span className="w-9" />
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Minimalkan"
+                className="rounded-full bg-black/40 text-white hover:bg-black/60"
+                onClick={() => setMinimized(true)}
+              >
+                <Minimize2 className="size-5" />
+              </Button>
             )}
           </div>
         </div>
@@ -274,7 +384,7 @@ export function CallRoom() {
 
       {/* Waiting card (share link) */}
       {showWaiting && (
-        <div className="absolute inset-x-0 bottom-32 z-10 flex justify-center px-4">
+        <div className="absolute inset-x-0 bottom-40 z-10 flex justify-center px-4">
           <div className="w-full max-w-sm rounded-2xl bg-black/70 p-4 text-center text-white backdrop-blur">
             <p className="text-sm text-white/80">
               Bagikan tautan ini ke teman Anda lewat Instagram, WhatsApp, atau apa pun:
@@ -295,8 +405,12 @@ export function CallRoom() {
         </div>
       )}
 
-      {/* Local video PiP */}
-      <div className="absolute right-3 top-16 z-10 aspect-[3/4] w-28 overflow-hidden rounded-2xl border border-white/20 bg-zinc-950 shadow-xl shadow-black/40 sm:w-40">
+      {/* Local video PiP (with visual filter applied to the preview) */}
+      <div
+        data-vc="local"
+        className="absolute right-3 top-16 z-10 aspect-[3/4] w-28 overflow-hidden rounded-2xl border border-white/20 bg-zinc-950 shadow-xl shadow-black/40 sm:w-40"
+        style={{ filter: localFilter === 'none' ? undefined : localFilter }}
+      >
         <VideoTile
           stream={localStream}
           mirror
@@ -319,8 +433,99 @@ export function CallRoom() {
         reason={showReconnecting ? statusDetail : undefined}
       />
 
-      {/* Bottom controls */}
-      <div className="absolute inset-x-0 bottom-6 z-10 flex justify-center px-4">
+      {/* Bottom controls: feature row + media controls */}
+      <div className="absolute inset-x-0 bottom-6 z-10 flex flex-col items-center gap-3 px-4">
+        {/* Feature row */}
+        <div className="flex items-center gap-2">
+          {/* Chat */}
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Buka pesan"
+              aria-pressed={chatOpen}
+              className={cn(featureBtn, chatOpen && 'bg-white/20')}
+              onClick={() => setChatOpen(!chatOpen)}
+            >
+              <MessageCircle className="size-5" />
+              {unreadCount > 0 && !chatOpen && (
+                <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Reaction */}
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Kirim reaksi"
+              aria-expanded={reactionTrayOpen}
+              className={cn(featureBtn, reactionTrayOpen && 'bg-white/20')}
+              onClick={() => setReactionTrayOpen((v) => !v)}
+            >
+              <Heart className="size-5" />
+            </button>
+            <AnimatePresence>
+              {reactionTrayOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full bg-black/80 p-1.5 backdrop-blur"
+                >
+                  {QUICK_REACTIONS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      aria-label={`Reaksi ${emoji}`}
+                      className="flex size-9 items-center justify-center rounded-full transition hover:bg-white/15"
+                      onClick={() => handleReaction(emoji)}
+                    >
+                      <span className="text-xl">{emoji}</span>
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Capture photo */}
+          <button
+            type="button"
+            aria-label="Ambil foto"
+            className={featureBtn}
+            onClick={handleCapture}
+          >
+            <Camera className="size-5" />
+          </button>
+
+          {/* Filter */}
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Efek"
+              aria-expanded={filterMenuOpen}
+              className={cn(
+                featureBtn,
+                filterMenuOpen && 'bg-white/20',
+                localFilter !== 'none' && 'text-primary',
+              )}
+              onClick={() => setFilterMenuOpen((v) => !v)}
+            >
+              <Sparkles className="size-5" />
+            </button>
+            {filterMenuOpen && (
+              <FilterMenu
+                current={localFilter}
+                onSelect={handleSelectFilter}
+                onClose={() => setFilterMenuOpen(false)}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Media controls */}
         <CallControls
           micOn={micOn}
           camOn={camOn}
@@ -331,6 +536,27 @@ export function CallRoom() {
           canSwitchCamera
         />
       </div>
+
+      {/* Chat panel (slides in from the right) */}
+      <AnimatePresence>
+        {chatOpen && (
+          <motion.div
+            key="chat"
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'tween', duration: 0.25 }}
+            className="absolute inset-y-0 right-0 z-30 h-full"
+          >
+            <ChatPanel
+              messages={chatMessages}
+              onSend={handleSendChat}
+              onClose={() => setChatOpen(false)}
+              peerName="Teman"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

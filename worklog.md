@@ -227,3 +227,83 @@ Stage Summary:
 - Production-ready 1:1 WebRTC video call (Instagram-style UI) with aggressive reconnection that survives network blips instead of dropping.
 - Single `/` route; views switched via ?room=. Signaling mini-service on port 3003 via gateway.
 - Honest limitation: cannot bridge into real Instagram (no public API) — both peers open the shared web link. Longer network drops (>socket ping timeout) would need userId-based room rejoin + TURN for restrictive NATs (documented in code comments).
+
+---
+Task ID: f1
+Agent: main (orchestrator) — Instagram-feature core
+Task: Add Instagram-VC-style features (our own implementation) on top of the existing VuCall WebRTC app.
+
+Work Log:
+- Extended signaling.ts SignalType: added 'chat' and 'reaction' (relayed via existing dumb-relay signal event).
+- Extended webrtc.ts CallManager:
+  * New types: ChatMessage, Reaction, NetworkQuality (0-4)
+  * New handlers: onChat, onReaction, onQuality
+  * handleSignal now dispatches 'chat'/'reaction' signals to onChat/onReaction
+  * sendChat(text) / sendReaction(emoji) — relay via signaling, also surface locally
+  * emitQuality(iceState) — maps ICE connection state to 0-4 bars, called from oniceconnectionstatechange
+- Extended vc-store.ts:
+  * chatMessages, reactions, localFilter (CSS), networkQuality, chatOpen, minimized, unreadCount
+  * addChat/addReaction/removeReaction/setLocalFilter/setNetworkQuality/setChatOpen/setMinimized
+  * FILTER_PRESETS constant (Normal/Vivid/Warm/Cool/Mono/Vintage/Dreamy) exported for the filter UI
+- Feature set: in-call chat, floating reactions, photo capture, visual filters (local preview), network-quality bars, minimize-to-PiP.
+
+Stage Summary:
+- Core logic + state ready. Contracts: CallManager has sendChat/sendReaction + onChat/onReaction/onQuality; store has chatMessages/reactions/localFilter/networkQuality/minimized; FILTER_PRESETS @ vc-store.
+- Next: presentational components (subagent) + call-room wiring + 2-session browser test.
+
+---
+Task ID: f2
+Agent: full-stack-developer (VC feature components)
+Task: Build 5 Instagram-style presentational components on top of the existing VuCall WebRTC app — chat panel, floating reactions overlay, network quality bars, minimized-to-PiP draggable card, and visual filter menu.
+
+Work Log:
+- Read worklog.md (vc-1, vc-3, vc-4, f1) + the actual contracts in src/lib/webrtc.ts (ChatMessage/Reaction/NetworkQuality types), src/lib/vc-store.ts (FILTER_PRESETS const), src/components/vc/video-tile.tsx (VideoTile props), src/components/vc/call-controls.tsx (style convention — plain <button> + bg-red-600 + aria-* + role=toolbar), src/lib/utils.ts (cn), src/app/globals.css (confirmed `scrollbar-thin` utility). Did NOT touch any file outside the 5 assigned.
+- Wrote src/components/vc/quality-bars.tsx — 'use client', pure display. 4 vertical bars h-[3/5/7/9]px, w-1, gap-0.5, items-end. Color: q0 red-dim/red-dim30, q1 red+white20, q2 amber+white20, q3/q4 emerald+white20. `role=status` + `aria-label="Connection quality: N of 4"` + `title`. No interactivity.
+- Wrote src/components/vc/chat-panel.tsx — 'use client'. motion.aside slides in from x:'100%' → 0 (spring 32/320) + exit:'100%' (so AnimatePresence works if the orchestrator wraps it). Fixed inset-y-0 right-0, w-[88vw] sm:w-96, bg-zinc-950/95 backdrop-blur-xl, border-l white/10, role=dialog + aria-label. Header: gradient avatar (initials from peerName, fallback '?') + name (fallback 'Peer') + 'In-call chat' subtitle + X close button. Body: plain div with scrollbar-thin + overflow-y-auto; auto-scroll to bottom on messages.length change via scrollTop=scrollHeight effect. Empty state: muted Send icon + "Belum ada pesan. Sapa temanmu!". Messages: from='me' → right-aligned bg-primary text-primary-foreground rounded-2xl rounded-br-sm; from='peer' → left-aligned bg-white/10 text-white rounded-2xl rounded-bl-sm; timestamp below (text-[10px] text-white/40, HH:MM). Composer: plain <textarea> rows=1 field-sizing-content max-h-24 + Send button (bg-primary, disabled when text.trim() empty). Enter sends (preventDefault); Shift+Enter inserts newline. maxLength 1000. Plain elements (matching call-controls convention) so the dark Instagram styling overrides cleanly.
+- Wrote src/components/vc/reactions-overlay.tsx — 'use client'. Container: pointer-events-none absolute inset-0 z-20 overflow-hidden aria-hidden. Each reaction rendered by a memoized <ReactionItem> whose per-id randomization (xPct 10–90, drift ±40px, scale 0.85–1.25, stagger 0–0.15s) is derived deterministically from a stable string hash of reaction.id — never re-randomizes on parent re-render. motion.span animates initial {y:'20%', opacity:0, scale:scale*0.6} → animate {y:'-60vh', opacity:[0,1,1,0], x:drift, scale:[scale*0.6, scale*1.1, scale]} over 2.4s ease-out (opacity times [0,0.12,0.75,1]). Removal: one-shot setTimeout(2600 + delay*1000) → onDone(reaction.id), cleared on unmount — no synchronous setState-in-render, no infinite loop.
+- Wrote src/components/vc/filter-menu.tsx — 'use client'. Imports FILTER_PRESETS from '@/lib/vc-store' (per the contract). Container: absolute bottom-full mb-2 right-0 z-30 w-44 rounded-xl border white/10 bg-zinc-950/95 backdrop-blur-xl p-2 (parent must be relative). Header: Sparkles icon + "Efek" label (text-[11px] uppercase). Column of role=menuitemradio buttons (one per preset); each row has a swatch (size-7 rounded-full ring-1 ring-white/15) wrapping a div with `style={{ filter: preset.css }}` over a fixed colorful gradient (red→amber→emerald→sky), so each filter's visual signature is obvious at a glance. Active row (current === preset.css): swatch gets ring-2 ring-primary, row gets bg-white/10, and a Check (text-primary) appears at the right. Clicking a row calls onSelect(preset.css) then onClose().
+- Wrote src/components/vc/minimized-pip.tsx — 'use client'. Fixed-positioned drag card with transform-translate state. Position initialized off-screen ({x:-9999, y:-9999}) + ready=false; useLayoutEffect measures the card on mount via cardRef.offsetWidth/Height and places it bottom-right (window.inner* - size - 16). Reshow via `opacity: ready ? 1 : 0` so no flash at (0,0). Resize listener re-clamps. Drag: pointerdown captures pointer + records start {px,py,ox,oy,w,h}; pointermove applies dx/dy, clamps to viewport with EDGE_GAP=16 on all sides; pointerup/cancel releases capture. The whole card is the drag handle (cursor-grab / cursor-grabbing while dragging). Content: aspect-video remote VideoTile (muted=false) or local fallback + placeholder "No video"; "VuCall" label top-left with pulsing emerald dot (animate-ping); local PiP overlay bottom-right (w-14 h-20 rounded-md, VideoTile mirror muted). Slim control row with onPointerDown stopPropagation so the Maximize2 (onExpand) and red PhoneOff (onEnd) buttons don't start a drag. Uses VideoTile + QualityBars (imports the sibling components just built).
+- Wrote agent-ctx/f2-fullstack-developer.md work record summarizing the above.
+
+Stage Summary:
+- 5 files created (all 'use client', no `any`, no unused imports, accessible, mobile-first):
+  - src/components/vc/quality-bars.tsx
+  - src/components/vc/chat-panel.tsx
+  - src/components/vc/reactions-overlay.tsx
+  - src/components/vc/filter-menu.tsx
+  - src/components/vc/minimized-pip.tsx
+- All prop-driven (no store coupling except filter-menu importing the FILTER_PRESETS const from vc-store, as instructed). The orchestrator can compose them freely.
+- Brand: red accent (bg-primary / text-primary-foreground) for the Send button, "me" chat bubbles, end-call button, active filter ring + check, avatar gradient. NO indigo/blue. Dark glassy surfaces (bg-zinc-950/95, bg-black/60, backdrop-blur).
+- framer-motion used lightly: chat panel slide-in/out, reactions rising. PiP uses plain pointer events (transform state) since framer-motion's transform would clash with the drag-translate style.
+- Prop contracts (for orchestrator consumption):
+  * QualityBars: { quality: NetworkQuality } — pure display, `role=status` inline-flex.
+  * ChatPanel: { messages: ChatMessage[]; onSend: (text: string) => void; onClose: () => void; peerName?: string } — `fixed inset-y-0 right-0`, includes exit animation (wrap in <AnimatePresence> if desired).
+  * ReactionsOverlay: { reactions: Reaction[]; onDone: (id: string) => void } — `absolute inset-0 pointer-events-none`, parent must be relative.
+  * FilterMenu: { current: string; onSelect: (css: string) => void; onClose: () => void } — `absolute bottom-full right-0`, parent must be relative.
+  * MinimizedPip: { localStream: MediaStream|null; remoteStream: MediaStream|null; quality: NetworkQuality; onExpand: () => void; onEnd: () => void } — `position: fixed`, self-contained dragging.
+- Did NOT run lint/dev (orchestrator will lint after integration).
+
+---
+Task ID: f3 & f4
+Agent: main (orchestrator) — feature wiring + verification
+Task: Wire Instagram-VC features into call-room; Agent Browser 2-session verification.
+
+Work Log:
+- Dispatched subagent (f2) for presentational components: chat-panel, reactions-overlay, quality-bars, minimized-pip, filter-menu — all built.
+- Rewrote src/components/vc/call-room.tsx: wired CallManager onChat/onReaction/onQuality → store; added feature control row (chat toggle + unread badge, reaction tray with 5 quick emojis, photo capture, filter toggle) above CallControls; QualityBars in top bar; minimize button in top bar; rendered ChatPanel (AnimatePresence slide), ReactionsOverlay, FilterMenu popover; wrapped local PiP with style.filter; minimized view renders MinimizedPip floating over "Panggilan berlangsung" background; photo capture draws remote video frame → canvas → PNG download + toast.
+- Fixed runtime: lucide has no `Clap` export → simplified reaction tray to plain emoji strings (icons were sr-only anyway).
+- Lint clean (removed one unused eslint-disable via --fix).
+
+Agent Browser 2-session verification (room JS6A94, both connected 0:08, ICE connected):
+- Chat A→B: A typed "halo dari A" → signaling `relay chat from A to B` → opening B's chat panel shows the message. ✓ (bidirectional relay symmetric)
+- Reactions A→B: A tapped ❤️ → floating emoji on A + on B; signaling `relay reaction from A to B`. ✓
+- Filters: opened Efek menu, selected Vintage → local video wrapper style.filter = "sepia(0.6) contrast(0.9) brightness(1.1)". ✓ (note: CSS preview-only; peer sees raw — lite version)
+- Quality bars: aria-label "Connection quality: 4 of 4" when connected. ✓
+- Photo capture: clicked → canvas snapshot of remote video → PNG download triggered, no error. ✓
+- Minimize: clicked → "Panggilan berlangsung" background + draggable MinimizedPip (2 videos: remote+local mini); Expand button returns to full call (timer continues 5:13). ✓
+- No console errors throughout.
+
+Stage Summary:
+- Instagram-VC features (our own implementation) fully working on the Instagram-styled VuCall: in-call chat, floating reactions, photo capture, visual filters, network-quality bars, minimize-to-PiP.
+- The call still survives network blips (reconnection logic unchanged) + now has Instagram-like engagement features.
+- Both peers open the shared web link (Instagram bridge not possible — no API), but the experience mirrors Instagram video call.

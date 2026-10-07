@@ -21,11 +21,30 @@ export type CallStatus =
   | 'ended'
   | 'failed'
 
+export type ChatMessage = {
+  id: string
+  from: 'me' | 'peer'
+  text: string
+  timestamp: number
+}
+
+export type Reaction = {
+  id: string
+  emoji: string
+  from: 'me' | 'peer'
+  timestamp: number
+}
+
+export type NetworkQuality = 0 | 1 | 2 | 3 | 4 // 0 = none, 4 = excellent
+
 export type CallManagerHandlers = {
   onRemoteStream?: (stream: MediaStream | null) => void
   onStatus?: (status: CallStatus, detail?: string) => void
   onReconnectAttempt?: (attempt: number) => void
   onError?: (message: string) => void
+  onChat?: (msg: ChatMessage) => void
+  onReaction?: (reaction: Reaction) => void
+  onQuality?: (quality: NetworkQuality) => void
 }
 
 /**
@@ -192,7 +211,8 @@ export class CallManager {
 
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState
-      console.log('[vc] ice state:', state, '| conn state:', pc.connectionState, '| signaling:', pc.signalingState)
+      console.log('[vc] ice state:', state, '| signaling:', pc.signalingState)
+      this.emitQuality(state)
       if (state === 'connected' || state === 'completed') {
         this.clearReconnect()
         this.reconnectAttempts = 0
@@ -278,10 +298,101 @@ export class CallManager {
       } else if (msg.type === 'renegotiate-request') {
         // The remote peer asked us to restart. Trigger an ICE restart.
         await this.restartConnection('remote-request')
+      } else if (msg.type === 'chat') {
+        const data = msg.data as { id: string; text: string; timestamp: number }
+        if (data?.text) {
+          this.handlers.onChat?.({
+            id: data.id,
+            from: 'peer',
+            text: data.text,
+            timestamp: data.timestamp,
+          })
+        }
+      } else if (msg.type === 'reaction') {
+        const data = msg.data as { id: string; emoji: string; timestamp: number }
+        if (data?.emoji) {
+          this.handlers.onReaction?.({
+            id: data.id,
+            emoji: data.emoji,
+            from: 'peer',
+            timestamp: data.timestamp,
+          })
+        }
       }
     } catch (err) {
       console.error('[webrtc] signal handling error:', err)
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // In-call features (chat / reactions) — relayed through the signaling
+  // server (tiny payload, no need for a DataChannel). These work even while
+  // the media path is briefly interrupted.
+  // -------------------------------------------------------------------------
+
+  private newId() {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  }
+
+  /** Send a chat message to the peer. */
+  sendChat(text: string) {
+    const trimmed = text.trim().slice(0, 1000)
+    if (!trimmed) return
+    const msg: ChatMessage = {
+      id: this.newId(),
+      from: 'me',
+      text: trimmed,
+      timestamp: Date.now(),
+    }
+    this.signaling.sendSignal('chat', {
+      id: msg.id,
+      text: msg.text,
+      timestamp: msg.timestamp,
+    })
+    this.handlers.onChat?.(msg)
+  }
+
+  /** Send a floating reaction emoji to the peer (also surfaces locally). */
+  sendReaction(emoji: string) {
+    const r: Reaction = {
+      id: this.newId(),
+      emoji,
+      from: 'me',
+      timestamp: Date.now(),
+    }
+    this.signaling.sendSignal('reaction', {
+      id: r.id,
+      emoji: r.emoji,
+      timestamp: r.timestamp,
+    })
+    this.handlers.onReaction?.(r)
+  }
+
+  /** Map the ICE connection state to a 0–4 quality score. */
+  private emitQuality(iceState: RTCIceConnectionState) {
+    let q: NetworkQuality
+    switch (iceState) {
+      case 'connected':
+      case 'completed':
+        q = 4
+        break
+      case 'checking':
+        q = 2
+        break
+      case 'new':
+        q = 1
+        break
+      case 'disconnected':
+        q = 1
+        break
+      case 'failed':
+      case 'closed':
+        q = 0
+        break
+      default:
+        q = 1
+    }
+    this.handlers.onQuality?.(q)
   }
 
   // -------------------------------------------------------------------------
