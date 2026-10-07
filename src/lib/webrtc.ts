@@ -21,20 +21,6 @@ export type CallStatus =
   | 'ended'
   | 'failed'
 
-export type ChatMessage = {
-  id: string
-  from: 'me' | 'peer'
-  text: string
-  timestamp: number
-}
-
-export type Reaction = {
-  id: string
-  emoji: string
-  from: 'me' | 'peer'
-  timestamp: number
-}
-
 export type NetworkQuality = 0 | 1 | 2 | 3 | 4 // 0 = none, 4 = excellent
 
 export type CallManagerHandlers = {
@@ -42,8 +28,6 @@ export type CallManagerHandlers = {
   onStatus?: (status: CallStatus, detail?: string) => void
   onReconnectAttempt?: (attempt: number) => void
   onError?: (message: string) => void
-  onChat?: (msg: ChatMessage) => void
-  onReaction?: (reaction: Reaction) => void
   onQuality?: (quality: NetworkQuality) => void
 }
 
@@ -115,8 +99,18 @@ export class CallManager {
     this.setStatus('requesting-media')
     let stream: MediaStream
     try {
+      // Instagram-style ideal constraints: ask for a square (1:1) capture at a
+      // modest resolution. Where supported, the browser crops the sensor at the
+      // hardware level before sending — so no pixels are wasted in transit and
+      // the tile can be `object-fit: cover`'d into a square container without
+      // distortion or black bars.
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: this.mediaFacing, width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: {
+          facingMode: this.mediaFacing,
+          width: { ideal: 640 },
+          height: { ideal: 640 },
+          aspectRatio: { ideal: 1.0 },
+        },
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       })
     } catch (e) {
@@ -298,26 +292,6 @@ export class CallManager {
       } else if (msg.type === 'renegotiate-request') {
         // The remote peer asked us to restart. Trigger an ICE restart.
         await this.restartConnection('remote-request')
-      } else if (msg.type === 'chat') {
-        const data = msg.data as { id: string; text: string; timestamp: number }
-        if (data?.text) {
-          this.handlers.onChat?.({
-            id: data.id,
-            from: 'peer',
-            text: data.text,
-            timestamp: data.timestamp,
-          })
-        }
-      } else if (msg.type === 'reaction') {
-        const data = msg.data as { id: string; emoji: string; timestamp: number }
-        if (data?.emoji) {
-          this.handlers.onReaction?.({
-            id: data.id,
-            emoji: data.emoji,
-            from: 'peer',
-            timestamp: data.timestamp,
-          })
-        }
       }
     } catch (err) {
       console.error('[webrtc] signal handling error:', err)
@@ -325,48 +299,8 @@ export class CallManager {
   }
 
   // -------------------------------------------------------------------------
-  // In-call features (chat / reactions) — relayed through the signaling
-  // server (tiny payload, no need for a DataChannel). These work even while
-  // the media path is briefly interrupted.
+  // Reconnection logic — the whole point of beating "connection lost".
   // -------------------------------------------------------------------------
-
-  private newId() {
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-  }
-
-  /** Send a chat message to the peer. */
-  sendChat(text: string) {
-    const trimmed = text.trim().slice(0, 1000)
-    if (!trimmed) return
-    const msg: ChatMessage = {
-      id: this.newId(),
-      from: 'me',
-      text: trimmed,
-      timestamp: Date.now(),
-    }
-    this.signaling.sendSignal('chat', {
-      id: msg.id,
-      text: msg.text,
-      timestamp: msg.timestamp,
-    })
-    this.handlers.onChat?.(msg)
-  }
-
-  /** Send a floating reaction emoji to the peer (also surfaces locally). */
-  sendReaction(emoji: string) {
-    const r: Reaction = {
-      id: this.newId(),
-      emoji,
-      from: 'me',
-      timestamp: Date.now(),
-    }
-    this.signaling.sendSignal('reaction', {
-      id: r.id,
-      emoji: r.emoji,
-      timestamp: r.timestamp,
-    })
-    this.handlers.onReaction?.(r)
-  }
 
   /** Map the ICE connection state to a 0–4 quality score. */
   private emitQuality(iceState: RTCIceConnectionState) {
@@ -572,8 +506,10 @@ export class CallManager {
 
     // --- Video: animated canvas ---
     const canvas = document.createElement('canvas')
+    // Square canvas matches the 1:1 ideal capture ratio (no distortion when
+    // object-fit: cover'd into a square tile).
     canvas.width = 640
-    canvas.height = 360
+    canvas.height = 640
     const ctx = canvas.getContext('2d')!
     let raf = 0
     let t = 0

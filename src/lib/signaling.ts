@@ -7,8 +7,6 @@ export type SignalType =
   | 'answer'
   | 'ice'
   | 'renegotiate-request'
-  | 'chat'
-  | 'reaction'
 
 export type PeerJoinedInfo = { from: string; room: string; rejoin: boolean }
 export type PeerLeftInfo = { from: string; room: string }

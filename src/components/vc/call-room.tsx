@@ -2,23 +2,20 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { AnimatePresence, motion } from 'framer-motion'
 import { useTheme } from 'next-themes'
 import {
   ArrowLeft,
-  Camera,
   Check,
   Copy,
+  Eye,
+  EyeOff,
   Home,
-  MessageCircle,
   Minimize2,
   Moon,
   PhoneOff,
+  PictureInPicture2,
   Share2,
-  Smile,
-  Sparkles,
   Sun,
-  X,
 } from 'lucide-react'
 import { Signaling, type IncomingSignal } from '@/lib/signaling'
 import { CallManager, type CallStatus } from '@/lib/webrtc'
@@ -30,13 +27,7 @@ import { VideoTile } from './video-tile'
 import { CallControls } from './call-controls'
 import { ReconnectingOverlay } from './reconnecting-overlay'
 import { CallTimer } from './call-timer'
-import { ChatPanel } from './chat-panel'
-import { ReactionsOverlay } from './reactions-overlay'
 import { QualityBars } from './quality-bars'
-import { MinimizedPip } from './minimized-pip'
-import { FilterMenu } from './filter-menu'
-
-const QUICK_REACTIONS = ['❤️', '👍', '😂', '🔥', '👏']
 
 export function CallRoom() {
   const router = useRouter()
@@ -55,13 +46,9 @@ export function CallRoom() {
     reconnectAttempt,
     error,
     callStartedAt,
-    chatMessages,
-    reactions,
-    localFilter,
     networkQuality,
-    chatOpen,
-    minimized,
-    unreadCount,
+    pipActive,
+    selfHidden,
     setRoom,
     setStatus,
     setLocalStream,
@@ -71,30 +58,19 @@ export function CallRoom() {
     setReconnectAttempt,
     setError,
     startCallTimer,
-    addChat,
-    addReaction,
-    removeReaction,
-    setLocalFilter,
     setNetworkQuality,
-    setChatOpen,
-    setMinimized,
+    setPipActive,
+    setSelfHidden,
   } = useVCStore()
 
   const managerRef = useRef<CallManager | null>(null)
   const signalingRef = useRef<Signaling | null>(null)
   const pendingSignals = useRef<IncomingSignal[]>([])
   const [copied, setCopied] = useState(false)
-  const [reactionTrayOpen, setReactionTrayOpen] = useState(false)
-  const [filterMenuOpen, setFilterMenuOpen] = useState(false)
 
   useEffect(() => {
     if (!roomId) return
     let disposed = false
-
-    // Default chat panel open on desktop, closed on mobile.
-    if (typeof window !== 'undefined') {
-      setChatOpen(window.innerWidth >= 1024)
-    }
 
     const signaling = new Signaling({
       onConnect: async () => {
@@ -108,35 +84,25 @@ export function CallRoom() {
         }
         setRoom(roomId, res.youAreCaller ? 'caller' : 'callee')
 
-        const manager = new CallManager(
-          signaling,
-          !res.youAreCaller,
-          {
-            onRemoteStream: (s) => {
-              if (!disposed) setRemoteStream(s)
-            },
-            onStatus: (st: CallStatus, detail?: string) => {
-              if (disposed) return
-              setStatus(st, detail)
-              if (st === 'connected') startCallTimer()
-            },
-            onReconnectAttempt: (n: number) => {
-              if (!disposed) setReconnectAttempt(n)
-            },
-            onError: (m: string) => {
-              if (!disposed) setError(m)
-            },
-            onChat: (m) => {
-              if (!disposed) addChat(m)
-            },
-            onReaction: (r) => {
-              if (!disposed) addReaction(r)
-            },
-            onQuality: (q) => {
-              if (!disposed) setNetworkQuality(q)
-            },
+        const manager = new CallManager(signaling, !res.youAreCaller, {
+          onRemoteStream: (s) => {
+            if (!disposed) setRemoteStream(s)
           },
-        )
+          onStatus: (st: CallStatus, detail?: string) => {
+            if (disposed) return
+            setStatus(st, detail)
+            if (st === 'connected') startCallTimer()
+          },
+          onReconnectAttempt: (n: number) => {
+            if (!disposed) setReconnectAttempt(n)
+          },
+          onError: (m: string) => {
+            if (!disposed) setError(m)
+          },
+          onQuality: (q) => {
+            if (!disposed) setNetworkQuality(q)
+          },
+        })
         managerRef.current = manager
 
         for (const m of pendingSignals.current) {
@@ -171,6 +137,10 @@ export function CallRoom() {
 
     return () => {
       disposed = true
+      // Exit native Picture-in-Picture if it's open.
+      if (typeof document !== 'undefined' && document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(() => {})
+      }
       managerRef.current?.close()
       managerRef.current = null
       signaling.disconnect()
@@ -180,7 +150,34 @@ export function CallRoom() {
      
   }, [roomId])
 
+  // Attach native Picture-in-Picture listeners to the remote <video> so the
+  // toolbar reflects real OS PiP state (e.g. when the user closes the floating
+  // window from the OS). Re-attach when the remote stream changes.
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    let v: HTMLVideoElement | null
+    const attach = () => {
+      v = document.querySelector<HTMLVideoElement>('[data-vc="remote"] video')
+      if (!v) return
+      v.addEventListener('enterpictureinpicture', () => setPipActive(true))
+      v.addEventListener('leavepictureinpicture', () => setPipActive(false))
+    }
+    // Wait a tick for the VideoTile to mount its <video> after remoteStream lands.
+    const id = window.setTimeout(attach, 120)
+    return () => {
+      window.clearTimeout(id)
+      if (v) {
+        v.removeEventListener('enterpictureinpicture', () => setPipActive(true))
+        v.removeEventListener('leavepictureinpicture', () => setPipActive(false))
+      }
+    }
+     
+  }, [remoteStream])
+
   function handleEnd() {
+    if (typeof document !== 'undefined' && document.pictureInPictureElement) {
+      document.exitPictureInPicture().catch(() => {})
+    }
     managerRef.current?.close()
     signalingRef.current?.leaveRoom()
     router.push('/')
@@ -194,44 +191,29 @@ export function CallRoom() {
   async function handleSwitchCamera() {
     await managerRef.current?.switchCamera()
   }
-  function handleSendChat(text: string) {
-    managerRef.current?.sendChat(text)
-  }
-  function handleReaction(emoji: string) {
-    managerRef.current?.sendReaction(emoji)
-    setReactionTrayOpen(false)
-  }
-  function handleSelectFilter(css: string) {
-    setLocalFilter(css)
-    setFilterMenuOpen(false)
-  }
-  function handleCapture() {
-    const video = document.querySelector<HTMLVideoElement>(
-      '[data-vc="remote"] video',
-    )
-    if (!video || !video.videoWidth) {
-      toast({ title: 'Belum ada video untuk difoto.' })
-      return
+
+  /** Real, native Picture-in-Picture on the remote video (OS-level floating
+   *  window that persists across tabs). NOT a fake in-app mini-player. */
+  async function togglePiP() {
+    if (typeof document === 'undefined') return
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture()
+      } else {
+        const v = document.querySelector<HTMLVideoElement>(
+          '[data-vc="remote"] video',
+        )
+        if (!v) {
+          toast({ title: 'Belum ada video untuk PiP.' })
+          return
+        }
+        await v.requestPictureInPicture()
+      }
+    } catch {
+      toast({ title: 'PiP tidak didukung di browser ini.' })
     }
-    const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.drawImage(video, 0, 0)
-    canvas.toBlob((blob) => {
-      if (!blob) return
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `vucall-${roomId}-${Date.now()}.png`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-      toast({ title: 'Foto tersimpan', description: 'Snapshot panggilan diunduh.' })
-    }, 'image/png')
   }
+
   async function copyLink() {
     try {
       await navigator.clipboard.writeText(window.location.href)
@@ -273,26 +255,6 @@ export function CallRoom() {
     )
   }
 
-  // ---- Minimized: floating PiP over a quiet background ----
-  if (minimized) {
-    return (
-      <div className="relative flex h-[100dvh] w-full flex-col items-center justify-center gap-3 bg-background text-center">
-        <p className="text-lg font-bold">Panggilan berlangsung</p>
-        <p className="max-w-xs text-sm text-muted-foreground">
-          Geser pip untuk memindahkan. Ketuk perbesar untuk kembali ke layar penuh.
-        </p>
-        <p className="font-mono uppercase tracking-wider text-muted-foreground">{roomId}</p>
-        <MinimizedPip
-          localStream={localStream}
-          remoteStream={remoteStream}
-          quality={networkQuality}
-          onExpand={() => setMinimized(false)}
-          onEnd={handleEnd}
-        />
-      </div>
-    )
-  }
-
   // ---- Active call screen (repo 3-pane layout, adapted 1:1) ----
   const navBtn =
     'relative flex items-center justify-center text-muted-foreground transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded'
@@ -315,86 +277,35 @@ export function CallRoom() {
           <button type="button" aria-label="Leave call" className={navBtn} onClick={handleEnd}>
             <Home className="size-6" />
           </button>
+
+          {/* Native Picture-in-Picture */}
           <button
             type="button"
-            aria-label="Buka pesan"
-            aria-pressed={chatOpen}
-            className={cn(navBtn, chatOpen && 'text-primary')}
-            onClick={() => setChatOpen(!chatOpen)}
+            aria-label={pipActive ? 'Keluar dari Picture-in-Picture' : 'Picture-in-Picture'}
+            aria-pressed={pipActive}
+            className={cn(navBtn, pipActive && 'text-primary')}
+            onClick={togglePiP}
           >
-            <MessageCircle className="size-6" />
-            {unreadCount > 0 && !chatOpen && (
-              <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-white">
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </span>
-            )}
+            <PictureInPicture2 className="size-6" />
           </button>
 
-          {/* Reaction */}
-          <div className="relative">
-            <button
-              type="button"
-              aria-label="Kirim reaksi"
-              aria-expanded={reactionTrayOpen}
-              className={cn(navBtn, reactionTrayOpen && 'text-primary')}
-              onClick={() => setReactionTrayOpen((v) => !v)}
-            >
-              <Smile className="size-6" />
-            </button>
-            <AnimatePresence>
-              {reactionTrayOpen && (
-                <motion.div
-                  initial={{ opacity: 0, x: -10, scale: 0.95 }}
-                  animate={{ opacity: 1, x: 0, scale: 1 }}
-                  exit={{ opacity: 0, x: -10, scale: 0.95 }}
-                  className="absolute left-full top-0 ml-2 flex items-center gap-1 rounded-full bg-card p-1.5 vc-shadow"
-                >
-                  {QUICK_REACTIONS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      aria-label={`Reaksi ${emoji}`}
-                      className="flex size-9 items-center justify-center rounded-full transition hover:bg-secondary"
-                      onClick={() => handleReaction(emoji)}
-                    >
-                      <span className="text-xl">{emoji}</span>
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          <button type="button" aria-label="Ambil foto" className={navBtn} onClick={handleCapture}>
-            <Camera className="size-6" />
+          {/* Hide / show self-view (like Instagram) */}
+          <button
+            type="button"
+            aria-label={selfHidden ? 'Tampilkan kamera saya' : 'Sembunyikan kamera saya'}
+            aria-pressed={selfHidden}
+            className={cn(navBtn, selfHidden && 'text-primary')}
+            onClick={() => setSelfHidden(!selfHidden)}
+          >
+            {selfHidden ? <EyeOff className="size-6" /> : <Eye className="size-6" />}
           </button>
-
-          {/* Filter */}
-          <div className="relative">
-            <button
-              type="button"
-              aria-label="Efek"
-              aria-expanded={filterMenuOpen}
-              className={cn(navBtn, filterMenuOpen && 'text-primary', localFilter !== 'none' && 'text-primary')}
-              onClick={() => setFilterMenuOpen((v) => !v)}
-            >
-              <Sparkles className="size-6" />
-            </button>
-            {filterMenuOpen && (
-              <FilterMenu
-                current={localFilter}
-                onSelect={handleSelectFilter}
-                onClose={() => setFilterMenuOpen(false)}
-              />
-            )}
-          </div>
         </nav>
       </aside>
 
       {/* Main: video area + bottom action bar */}
       <main className="app-main flex flex-1 flex-col px-4 pb-4 pt-16 sm:px-8 sm:pt-[72px]">
         <div className="video-call-wrapper relative w-full flex-1 overflow-hidden rounded-2xl bg-zinc-950">
-          {/* Remote (full-bleed) */}
+          {/* Remote (full-bleed, object-cover crops — no distortion/black bars) */}
           <div data-vc="remote" className="absolute inset-0">
             <VideoTile
               stream={remoteStream}
@@ -428,32 +339,49 @@ export function CallRoom() {
             )}
           </div>
 
-          {/* Local PiP tile */}
-          <div
-            data-vc="local"
-            className="absolute right-3 top-3 z-10 aspect-video w-28 overflow-hidden rounded-lg border border-white/20 bg-zinc-950 shadow-lg sm:w-44"
-            style={{ filter: localFilter === 'none' ? undefined : localFilter }}
-          >
-            <VideoTile
-              stream={localStream}
-              mirror
-              muted
-              objectCover={false}
-              aria-label="You"
-              className="h-full w-full"
-              placeholder={
-                <div className="flex h-full w-full items-center justify-center bg-zinc-900">
-                  <span className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                </div>
-              }
-            />
-            <span className="absolute bottom-1 right-1 rounded px-2 py-0.5 text-[10px] text-white vc-glass">
-              You
-            </span>
-          </div>
-
-          {/* Floating reactions */}
-          <ReactionsOverlay reactions={reactions} onDone={removeReaction} />
+          {/* Local self-view tile: SQUARE container + object-cover (Instagram
+              crop trick). Hidden when selfHidden — replaced by a small "show"
+              pill, exactly like Instagram's hide-self-view. */}
+          {selfHidden ? (
+            <button
+              type="button"
+              onClick={() => setSelfHidden(false)}
+              className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1.5 text-xs text-white backdrop-blur hover:bg-black/70"
+            >
+              <Eye className="size-4" />
+              Tampilkan kamera
+            </button>
+          ) : (
+            <div
+              data-vc="local"
+              className="absolute right-3 top-3 z-10 aspect-square w-28 overflow-hidden rounded-lg border border-white/20 bg-zinc-950 shadow-lg sm:w-40"
+            >
+              <VideoTile
+                stream={localStream}
+                mirror
+                muted
+                objectCover
+                aria-label="You"
+                className="h-full w-full"
+                placeholder={
+                  <div className="flex h-full w-full items-center justify-center bg-zinc-900">
+                    <span className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                  </div>
+                }
+              />
+              <button
+                type="button"
+                aria-label="Sembunyikan kamera saya"
+                onClick={() => setSelfHidden(true)}
+                className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur hover:bg-black/70"
+              >
+                <EyeOff className="size-3.5" />
+              </button>
+              <span className="absolute bottom-1 right-1 rounded px-2 py-0.5 text-[10px] text-white vc-glass">
+                You
+              </span>
+            </div>
+          )}
 
           {/* Top status overlay */}
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4">
@@ -480,13 +408,17 @@ export function CallRoom() {
               <QualityBars quality={networkQuality} />
               <span className="font-mono text-xs uppercase tracking-wider text-white/80">{roomId}</span>
             </div>
+            {/* PiP quick button (mobile, since the nav rail is hidden < sm) */}
             <div className="pointer-events-auto">
               <Button
                 variant="ghost"
                 size="icon"
-                aria-label="Minimalkan"
-                className="rounded-full bg-black/40 text-white hover:bg-black/60"
-                onClick={() => setMinimized(true)}
+                aria-label="Picture-in-Picture"
+                className={cn(
+                  'rounded-full bg-black/40 text-white hover:bg-black/60 sm:hidden',
+                  pipActive && 'text-primary',
+                )}
+                onClick={togglePiP}
               >
                 <Minimize2 className="size-5" />
               </Button>
@@ -501,11 +433,7 @@ export function CallRoom() {
                 <div className="mt-2 break-all rounded-lg bg-white/10 px-3 py-2 text-xs font-mono">
                   {typeof window !== 'undefined' ? window.location.href : `/?room=${roomId}`}
                 </div>
-                <Button
-                  onClick={copyLink}
-                  size="sm"
-                  className="mt-3 w-full gap-2 rounded-lg"
-                >
+                <Button onClick={copyLink} size="sm" className="mt-3 w-full gap-2 rounded-lg">
                   {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
                   {copied ? 'Tautan disalin!' : 'Salin tautan'}
                 </Button>
@@ -533,54 +461,6 @@ export function CallRoom() {
           />
         </div>
       </main>
-
-      {/* Right chat panel */}
-      <AnimatePresence>
-        {chatOpen && (
-          <motion.aside
-            key="right-side"
-            initial={{ x: '100%' }}
-            animate={{ x: 0 }}
-            exit={{ x: '100%' }}
-            transition={{ type: 'tween', duration: 0.25 }}
-            className="right-side absolute inset-y-0 right-0 z-30 flex w-full flex-col gap-3 bg-background p-3 sm:w-[360px] lg:relative lg:ml-auto lg:w-[400px] lg:shrink-0 lg:bg-transparent lg:p-4"
-          >
-            <button
-              type="button"
-              aria-label="Tutup pesan"
-              className="absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-full text-muted-foreground hover:text-foreground lg:hidden"
-              onClick={() => setChatOpen(false)}
-            >
-              <X className="size-5" />
-            </button>
-            <div className="h-[calc(100%-72px)] min-h-0">
-              <ChatPanel
-                messages={chatMessages}
-                onSend={handleSendChat}
-                onClose={() => setChatOpen(false)}
-                peerName="Teman"
-              />
-            </div>
-            {/* Participants (1:1 = 2 avatars) */}
-            <div className="participants ml-auto flex items-center gap-2 rounded-lg bg-card p-3 vc-shadow">
-              <div className="flex size-8 items-center justify-center rounded-lg bg-secondary text-xs font-bold text-primary">Me</div>
-              <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-xs font-bold text-primary-foreground">T</div>
-            </div>
-          </motion.aside>
-        )}
-      </AnimatePresence>
-
-      {/* Expand chat (mobile, when closed) */}
-      {!chatOpen && (
-        <button
-          type="button"
-          aria-label="Buka pesan"
-          className="expand-btn absolute right-4 top-5 z-40 flex size-9 items-center justify-center rounded-lg bg-card vc-shadow lg:hidden"
-          onClick={() => setChatOpen(true)}
-        >
-          <MessageCircle className="size-5 text-primary" />
-        </button>
-      )}
     </div>
   )
 }

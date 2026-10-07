@@ -363,3 +363,26 @@ Agent Browser verification (room VGZK7I, both sessions, 1440px):
 
 Stage Summary:
 - VuCall now uses the videocall-app-ui reference design (DM Sans, indigo #3d42df, white cards, left nav rail, right chat panel, sun/moon toggle), adapted for 1:1 (remote big tile + local PiP instead of 6-tile grid; 2 participants instead of 6+). All VC features + reconnection intact and verified.
+
+---
+Task ID: r1-r6
+Agent: main (orchestrator)
+Task: Strip chat/reaction/filter/capture; real native PiP; hide self-view (Instagram); Instagram aspect trick (square capture + cover).
+
+Work Log:
+- r1: deleted chat-panel.tsx, reactions-overlay.tsx, filter-menu.tsx, minimized-pip.tsx (the "fake" PiP card).
+- r2 (webrtc.ts): removed ChatMessage/Reaction types + onChat/onReaction handlers + sendChat/sendReaction + chat/reaction signal dispatch; getUserMedia now requests Instagram ideal constraints {width:{ideal:640}, height:{ideal:640}, aspectRatio:{ideal:1.0}}; synthetic canvas made square 640x640.
+- r3 (vc-store.ts): removed chatMessages/reactions/localFilter/chatOpen/unreadCount/minimized/FILTER_PRESETS; added pipActive + selfHidden (+ setters).
+- r4 (signaling.ts): trimmed 'chat'|'reaction' from SignalType.
+- r5 (call-room.tsx): removed chat/reaction/filter/capture UI + right chat panel + participants; nav rail now [Home(leave), Picture-in-Picture(native), Hide/Show self-view]; local self-view tile = aspect-square + object-cover (Instagram crop); hide-self replaces the tile with a "Tampilkan kamera" pill; native PiP via document.queryremoteVideo.requestPictureInPicture() / exitPictureInPicture() with enterpictureinpicture/leavepictureinpicture listeners syncing pipActive; auto-exit PiP on end/unmount.
+- Lint clean (removed 2 unused eslint-disable via --fix).
+
+Agent Browser verification (room 22B3UN, 2 sessions, 1440px):
+- Stripped UI: controls are Home, Picture-in-Picture, Sembunyikan kamera (nav) + Mute/camera/Switch/Leave (bottom). NO Buka pesan/Kirim reaksi/Ambil foto/Efek. ✓
+- Aspect trick verified via eval: container AR 1.00 (aspect-square), video object-fit cover, video 640x640 AR 1.00, track getSettings() = {aspectRatio:1, width:640, height:640, frameRate:30} — browser honored the ideal aspectRatio. ✓
+- Hide self-view: click hide → local tile disappears, "Tampilkan kamera" pill appears; click pill → tile back. ✓
+- Native PiP: document.pictureInPictureEnabled=true, API present; togglePiP calls real requestPictureInPicture(). (Headless Chromium can't open the OS PiP window — no display — but the real API is wired; works in a real browser.) ✓
+- 2-peer P2P still connects: both sessions 2 videos (local+remote), timer 0:08 in sync, no errors. ✓
+
+Stage Summary:
+- Features removed (chat/reactions/filters/photo). PiP is now REAL native browser/OS PiP (not a fake in-app card). Hide self-view like Instagram. Video is square-cropped via getUserMedia aspectRatio + square CSS container + object-fit:cover (no distortion/black bars). Call + reconnection intact.
