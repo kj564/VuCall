@@ -20,6 +20,9 @@ type VCState = {
   // Native Picture-in-Picture (real browser/OS PiP on the remote video) + self-view visibility.
   pipActive: boolean
   selfHidden: boolean
+  // Screen-share (replaces camera video with display media) + full-screen.
+  sharing: boolean
+  fullscreen: boolean
 
   setRoom: (roomId: string | null, role: 'caller' | 'callee' | null) => void
   setStatus: (status: CallStatus, detail?: string) => void
@@ -33,6 +36,8 @@ type VCState = {
   setNetworkQuality: (q: NetworkQuality) => void
   setPipActive: (v: boolean) => void
   setSelfHidden: (v: boolean) => void
+  setSharing: (v: boolean) => void
+  setFullscreen: (v: boolean) => void
   reset: () => void
 }
 
@@ -51,6 +56,8 @@ export const useVCStore = create<VCState>((set) => ({
   networkQuality: 0,
   pipActive: false,
   selfHidden: false,
+  sharing: false,
+  fullscreen: false,
 
   setRoom: (roomId, role) => set({ roomId, role }),
   setStatus: (status, statusDetail) => set({ status, statusDetail }),
@@ -65,6 +72,8 @@ export const useVCStore = create<VCState>((set) => ({
   setNetworkQuality: (networkQuality) => set({ networkQuality }),
   setPipActive: (pipActive) => set({ pipActive }),
   setSelfHidden: (selfHidden) => set({ selfHidden }),
+  setSharing: (sharing) => set({ sharing }),
+  setFullscreen: (fullscreen) => set({ fullscreen }),
 
   reset: () =>
     set({
@@ -82,5 +91,7 @@ export const useVCStore = create<VCState>((set) => ({
       networkQuality: 0,
       pipActive: false,
       selfHidden: false,
+      sharing: false,
+      fullscreen: false,
     }),
 }))

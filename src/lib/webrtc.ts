@@ -75,6 +75,11 @@ export class CallManager {
   private camEnabled = true
   private usingSynthetic = false
   private syntheticCleanup: (() => void) | null = null
+  // Screen-share state — the original camera video track is swapped out for a
+  // display-media track on the video sender while sharing.
+  private originalVideoTrack: MediaStreamTrack | null = null
+  private sharing = false
+  private screenStream: MediaStream | null = null
 
   // Bound listeners for clean-up
   private onlineListener: (() => void) | null = null
@@ -484,6 +489,85 @@ export class CallManager {
   getMicEnabled() {
     return this.micEnabled
   }
+
+  /** Whether the user is currently sharing their screen instead of the camera. */
+  isScreenSharing() {
+    return this.sharing
+  }
+
+  /**
+   * Toggle screen-share ("Share your screen", like Instagram VC). Swaps the
+   * video sender's track to a getDisplayMedia track; restores the camera when
+   * stopped. Uses replaceTrack so no renegotiation is needed.
+   */
+  async toggleScreenShare(): Promise<boolean> {
+    if (this.sharing) {
+      return this.stopScreenShare()
+    }
+    if (!this.localStream) return false
+    const cameraTrack = this.localStream.getVideoTracks()[0]
+    if (!cameraTrack) return false
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 15 } },
+        audio: false,
+      })
+      const screenTrack = display.getVideoTracks()[0]
+      if (!screenTrack) {
+        display.getTracks().forEach((t) => t.stop())
+        return false
+      }
+      const sender = this.senders.find((s) => s.track?.kind === 'video')
+      if (sender) await sender.replaceTrack(screenTrack)
+      this.originalVideoTrack = cameraTrack
+      this.screenStream = display
+      // Swap the local preview to the screen track too.
+      this.localStream.removeTrack(cameraTrack)
+      this.localStream.addTrack(screenTrack)
+      this.sharing = true
+      // If the user stops sharing from the browser's native "Stop sharing" bar,
+      // restore the camera automatically.
+      screenTrack.addEventListener('ended', () => {
+        void this.stopScreenShare()
+      })
+      return true
+    } catch (e) {
+      console.error('[webrtc] screen share failed:', e)
+      return false
+    }
+  }
+
+  /** Restore the camera video track (also called on call end). */
+  async stopScreenShare(): Promise<boolean> {
+    if (!this.sharing || !this.localStream) {
+      this.sharing = false
+      return false
+    }
+    const screenTrack = this.localStream.getVideoTracks()[0]
+    const sender = this.senders.find((s) => s.track?.kind === 'video')
+    if (this.originalVideoTrack && sender) {
+      try {
+        await sender.replaceTrack(this.originalVideoTrack)
+      } catch {
+        /* ignore */
+      }
+    }
+    if (screenTrack) {
+      this.localStream.removeTrack(screenTrack)
+      screenTrack.stop()
+    }
+    if (this.screenStream) {
+      this.screenStream.getTracks().forEach((t) => t.stop())
+      this.screenStream = null
+    }
+    if (this.originalVideoTrack) {
+      this.localStream.addTrack(this.originalVideoTrack)
+      this.originalVideoTrack.enabled = this.camEnabled
+      this.originalVideoTrack = null
+    }
+    this.sharing = false
+    return true
+  }
   getCamEnabled() {
     return this.camEnabled
   }
@@ -575,6 +659,14 @@ export class CallManager {
   /** End the call and release all resources. */
   close() {
     this.clearReconnect()
+    // Stop any active screen-share first so the display-media track is released.
+    if (this.sharing) {
+      void this.stopScreenShare()
+    }
+    if (this.screenStream) {
+      this.screenStream.getTracks().forEach((t) => t.stop())
+      this.screenStream = null
+    }
     if (this.syntheticCleanup) {
       this.syntheticCleanup()
       this.syntheticCleanup = null

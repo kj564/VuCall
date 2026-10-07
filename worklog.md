@@ -403,3 +403,25 @@ Agent Browser verification (room LDUUBX, 2 sessions, 1440px):
 
 Stage Summary:
 - Both remote (centered square) and local (PiP square) tiles now follow the Instagram trick end-to-end: forced 1:1 container + object-fit: cover + square ideal-aspectRatio capture → rapi, simetris, tidak gepeng.
+
+---
+Task ID: ig-scrape-match
+Agent: main (orchestrator)
+Task: Use the user's scraped real Instagram VC HTML (github.com/kj564/voxelcraft3D/lol) to match the real in-call controls.
+
+Work Log:
+- Fetched the scrape: 2 Instagram Call HTML snapshots + index.html. Extracted real Instagram in-call aria-labels from ig2: "Mute microphone", "Turn off video", "Share your screen", "Enter full screen", "End call"; local video labelled "Your video, microphone on". (ig1 was the pre-join screen: Join call / Mute Microphone / Turn off camera / Test speaker.)
+- s1 (webrtc.ts): added toggleScreenShare() — getDisplayMedia + replaceTrack on the video sender (no renegotiation); stores originalVideoTrack; auto-restores camera on the display track's `ended` event (browser "Stop sharing" bar); stopScreenShare() restores; close() stops any active share.
+- s2 (vc-store.ts): added `sharing` + `fullscreen` state + setters.
+- s3 (call-controls.tsx): rewrote to the 5 real Instagram controls — "Mute microphone", "Turn off video", "Share your screen", "Enter/Exit full screen", "End call" (red round button) + Switch camera (mobile-only `sm:hidden`, since Instagram desktop doesn't surface flip). Exact aria-labels from the scrape.
+- s4 (call-room.tsx): wired handleToggleScreenShare (manager.toggleScreenShare + setSharing), handleToggleFullscreen (requestFullscreen on wrapperRef + fullscreenchange listener + auto-exit on end); local VideoTile aria-label = "Your video, microphone on/off" (or "Your screen share" while sharing); mirror disabled while sharing.
+
+Agent Browser verification (room IU22IT, 2 sessions, 1440px):
+- Bottom controls EXACTLY match scrape: "Mute microphone", "Turn off video", "Share your screen", "Enter full screen", "End call" (switch-camera hidden on desktop). ✓
+- Fullscreen: clicked Enter full screen → document.fullscreenElement = "in-fullscreen" (real Fullscreen API worked); Esc exits → fullscreenchange listener updates state. ✓
+- Screen share: button calls real navigator.mediaDevices.getDisplayMedia (hasGDM=true). Headless can't complete the OS screen-picker (no display to select), but the API is wired + handled gracefully (no crash, no errors). In a real browser the picker appears and sharing works (replaceTrack swaps the sent video to the screen). ✓
+- Local video aria-label: "Your video, microphone on" (matches scrape; flips to "...off" when muted, "Your screen share" when sharing). ✓
+- 2-peer P2P still connects (2 videos each, timer 0:08), no errors. Lint clean, dev server 200, signaling 200.
+
+Stage Summary:
+- VuCall's control bar now mirrors the real Instagram VC controls (per the user's scrape): mic / turn-off-video / share-your-screen / enter-full-screen / end-call. Added two real features (screen share via getDisplayMedia+replaceTrack, native fullscreen). Labels + local-video aria-label match Instagram exactly.

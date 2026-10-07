@@ -49,6 +49,8 @@ export function CallRoom() {
     networkQuality,
     pipActive,
     selfHidden,
+    sharing,
+    fullscreen,
     setRoom,
     setStatus,
     setLocalStream,
@@ -61,11 +63,14 @@ export function CallRoom() {
     setNetworkQuality,
     setPipActive,
     setSelfHidden,
+    setSharing,
+    setFullscreen,
   } = useVCStore()
 
   const managerRef = useRef<CallManager | null>(null)
   const signalingRef = useRef<Signaling | null>(null)
   const pendingSignals = useRef<IncomingSignal[]>([])
+  const wrapperRef = useRef<HTMLDivElement>(null)
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -174,9 +179,25 @@ export function CallRoom() {
      
   }, [remoteStream])
 
+  // Track native full-screen state so the button reflects reality (e.g. when
+  // the user exits via Esc).
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const onFsChange = () =>
+      setFullscreen(Boolean(document.fullscreenElement))
+    document.addEventListener('fullscreenchange', onFsChange)
+    return () => document.removeEventListener('fullscreenchange', onFsChange)
+     
+  }, [])
+
   function handleEnd() {
-    if (typeof document !== 'undefined' && document.pictureInPictureElement) {
-      document.exitPictureInPicture().catch(() => {})
+    if (typeof document !== 'undefined') {
+      if (document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(() => {})
+      }
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {})
+      }
     }
     managerRef.current?.close()
     signalingRef.current?.leaveRoom()
@@ -190,6 +211,33 @@ export function CallRoom() {
   }
   async function handleSwitchCamera() {
     await managerRef.current?.switchCamera()
+  }
+
+  /** "Share your screen" — swap the video sender's track for a display-media
+   *  track (no renegotiation needed). The local preview switches to the screen
+   *  too, and the camera is restored when sharing stops (including via the
+   *  browser's native "Stop sharing" bar). */
+  async function handleToggleScreenShare() {
+    const ok = await managerRef.current?.toggleScreenShare()
+    setSharing(managerRef.current?.isScreenSharing() ?? false)
+    if (!ok) {
+      toast({ title: 'Tidak dapat berbagi layar.', description: 'Izinkan akses layar.' })
+    }
+  }
+
+  /** "Enter full screen" on the video wrapper (native Fullscreen API). */
+  async function handleToggleFullscreen() {
+    const el = wrapperRef.current
+    if (!el) return
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen()
+      } else {
+        await el.requestFullscreen()
+      }
+    } catch {
+      /* fullscreen may be blocked — ignore */
+    }
   }
 
   /** Real, native Picture-in-Picture on the remote video (OS-level floating
@@ -304,7 +352,10 @@ export function CallRoom() {
 
       {/* Main: video area + bottom action bar */}
       <main className="app-main flex flex-1 flex-col px-4 pb-4 pt-16 sm:px-8 sm:pt-[72px]">
-        <div className="video-call-wrapper relative w-full flex-1 overflow-hidden rounded-2xl bg-zinc-950">
+        <div
+          ref={wrapperRef}
+          className="video-call-wrapper relative w-full flex-1 overflow-hidden rounded-2xl bg-zinc-950"
+        >
           {/* Remote — a CENTERED SQUARE tile (forced 1:1 ratio, per the Instagram
               trick) so the square capture fills it with object-fit: cover and
               ZERO crop/distortion. (A full-bleed landscape container would
@@ -366,10 +417,12 @@ export function CallRoom() {
             >
               <VideoTile
                 stream={localStream}
-                mirror
+                mirror={!sharing}
                 muted
                 objectCover
-                aria-label="You"
+                aria-label={
+                  sharing ? 'Your screen share' : `Your video, microphone ${micOn ? 'on' : 'off'}`
+                }
                 className="h-full w-full"
                 placeholder={
                   <div className="flex h-full w-full items-center justify-center bg-zinc-900">
@@ -457,12 +510,16 @@ export function CallRoom() {
         </div>
 
         {/* Bottom action bar */}
-        <div className="mx-auto mt-4 flex w-full max-w-[500px] items-center justify-center">
+        <div className="mx-auto mt-4 flex w-full max-w-[520px] items-center justify-center">
           <CallControls
             micOn={micOn}
             camOn={camOn}
+            sharing={sharing}
+            fullscreen={fullscreen}
             onToggleMic={handleToggleMic}
             onToggleCam={handleToggleCam}
+            onToggleScreenShare={handleToggleScreenShare}
+            onToggleFullscreen={handleToggleFullscreen}
             onSwitchCamera={handleSwitchCamera}
             onEnd={handleEnd}
             canSwitchCamera
