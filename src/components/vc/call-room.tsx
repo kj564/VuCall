@@ -453,177 +453,137 @@ export function CallRoom() {
   //  bar). No left nav rail, no in-call theme toggle. ----
   return (
     <div className="relative flex h-[100dvh] w-full overflow-hidden bg-background">
-      {/* Main: video area + bottom action bar */}
-      <main className="flex flex-1 flex-col p-2 sm:p-4">
-        <div
-          ref={wrapperRef}
-          className="video-call-wrapper relative w-full flex-1 overflow-hidden rounded-2xl bg-zinc-950"
-        >
-          {/* Remote — full-bleed with object-fit: CONTAIN (Instagram-style):
-              shows the peer's FULL frame (no crop/zoom) with black bars where
-              the aspect ratio differs. No distortion, no over-zoom. */}
-          <div data-vc="remote" className="absolute inset-0">
-            <VideoTile
-              stream={remoteStream}
-              objectCover={false}
-              muted={false}
-              aria-label="Remote participant"
-              className="h-full w-full"
-              placeholder={
-                <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-gradient-to-b from-zinc-900 to-black text-center">
-                  <div className="flex size-20 items-center justify-center rounded-full bg-white/10">
-                    {showWaiting ? (
-                      <Share2 className="size-9 text-white/80" />
-                    ) : (
-                      <span className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                    )}
-                  </div>
-                  <p className="text-sm font-medium text-white/90">
-                    {showWaiting
-                      ? 'Menunggu teman Anda bergabung…'
-                      : requestingMedia
-                        ? 'Menyiapkan kamera & mikrofon…'
-                        : 'Menghubungkan…'}
-                  </p>
-                </div>
-              }
-            />
-            {remoteStream && (
-              <span className="absolute bottom-3 right-3 z-10 rounded px-3 py-1 text-xs text-white vc-glass">
-                Teman
-              </span>
-            )}
-          </div>
-
-          {/* Local self-view tile: SQUARE container + object-cover (Instagram
-              crop trick). Hidden when selfHidden — replaced by a small "show"
-              pill, exactly like Instagram's hide-self-view. */}
-          {selfHidden ? (
-            <button
-              type="button"
-              onClick={() => setSelfHidden(false)}
-              className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1.5 text-xs text-white backdrop-blur hover:bg-black/70"
-            >
-              <Eye className="size-4" />
-              Tampilkan kamera
-            </button>
-          ) : (
-            <div
-              data-vc="local"
-              className="absolute right-3 top-3 z-10 aspect-video w-40 overflow-hidden rounded-lg border border-white/20 bg-zinc-950 shadow-lg sm:w-52"
-            >
-              <VideoTile
-                stream={localStream}
-                mirror={false}
-                muted
-                objectCover={false}
-                aria-label={
-                  sharing ? 'Your screen share' : `Your video, microphone ${micOn ? 'on' : 'off'}`
-                }
-                className="h-full w-full"
-                placeholder={
-                  <div className="flex h-full w-full items-center justify-center bg-zinc-900">
+      {/* Instagram-clean in-call: full-bleed remote video + a small local PiP
+          (top-right) + two tiny utility buttons (top-left: mirror, PiP) + a
+          floating bottom control bar. No status pill, no leave button (End
+          call = leave), no theme toggle. Edge-to-edge video, no rounding. */}
+      <div ref={wrapperRef} className="relative h-[100dvh] w-full overflow-hidden bg-black">
+        {/* Remote — full-bleed, object-contain (full frame, black bars OK) */}
+        <div data-vc="remote" className="absolute inset-0">
+          <VideoTile
+            stream={remoteStream}
+            objectCover={false}
+            muted={false}
+            aria-label="Remote participant"
+            className="h-full w-full"
+            placeholder={
+              <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-black text-center">
+                <div className="flex size-20 items-center justify-center rounded-full bg-white/10">
+                  {showWaiting ? (
+                    <Share2 className="size-9 text-white/80" />
+                  ) : (
                     <span className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                  </div>
-                }
-              />
-              <button
-                type="button"
-                aria-label="Sembunyikan kamera saya"
-                onClick={() => setSelfHidden(true)}
-                className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur hover:bg-black/70"
-              >
-                <EyeOff className="size-3.5" />
-              </button>
-              <span className="absolute bottom-1 right-1 rounded px-2 py-0.5 text-[10px] text-white vc-glass">
-                You
-              </span>
-            </div>
-          )}
-
-          {/* Top status overlay */}
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4">
-            <div className="pointer-events-auto flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Leave call"
-                className="rounded-full bg-black/40 text-white hover:bg-black/60"
-                onClick={handleEnd}
-              >
-                <ArrowLeft className="size-5" />
-              </Button>
-            </div>
-            <div className="flex items-center gap-2 rounded-full bg-black/40 px-3 py-1.5 text-white">
-              <span
-                className={cn(
-                  'inline-block size-2 rounded-full',
-                  connected ? 'bg-emerald-400' : showReconnecting ? 'bg-amber-400' : 'bg-white/40',
-                )}
-              />
-              <CallTimer startedAt={connected ? callStartedAt : null} running={connected} />
-              <span className="text-white/40">·</span>
-              <QualityBars quality={networkQuality} />
-              <span className="font-mono text-xs uppercase tracking-wider text-white/80">{roomId}</span>
-            </div>
-            {/* Right: mirror (front cam) + Picture-in-Picture */}
-            <div className="pointer-events-auto flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={mirror ? 'Nonaktifkan mirror kamera depan' : 'Aktifkan mirror kamera depan'}
-                aria-pressed={mirror && facing === 'user'}
-                title="Mirror kamera depan"
-                className={cn(
-                  'rounded-full bg-black/40 text-white hover:bg-black/60',
-                  mirror && facing === 'user' && !sharing && 'text-primary',
-                )}
-                onClick={handleToggleMirror}
-                disabled={facing !== 'user' || sharing}
-              >
-                <FlipHorizontal className="size-5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={pipActive ? 'Keluar dari Picture-in-Picture' : 'Picture-in-Picture'}
-                aria-pressed={pipActive}
-                className={cn(
-                  'rounded-full bg-black/40 text-white hover:bg-black/60',
-                  pipActive && 'text-primary',
-                )}
-                onClick={togglePiP}
-              >
-                <Minimize2 className="size-5" />
-              </Button>
-            </div>
-          </div>
-
-          {/* Waiting share card */}
-          {showWaiting && (
-            <div className="absolute inset-x-0 bottom-24 z-10 flex justify-center px-4">
-              <div className="w-full max-w-sm rounded-2xl bg-black/70 p-4 text-center text-white backdrop-blur">
-                <p className="text-sm text-white/80">Bagikan tautan ini ke teman Anda lewat chat apa pun:</p>
-                <div className="mt-2 break-all rounded-lg bg-white/10 px-3 py-2 text-xs font-mono">
-                  {typeof window !== 'undefined' ? window.location.href : `/?room=${roomId}`}
+                  )}
                 </div>
-                <Button onClick={copyLink} size="sm" className="mt-3 w-full gap-2 rounded-lg">
-                  {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                  {copied ? 'Tautan disalin!' : 'Salin tautan'}
-                </Button>
+                <p className="text-sm font-medium text-white/90">
+                  {showWaiting
+                    ? 'Menunggu teman Anda bergabung…'
+                    : requestingMedia
+                      ? 'Menyiapkan kamera & mikrofon…'
+                      : 'Menghubungkan…'}
+                </p>
               </div>
-            </div>
-          )}
-
-          <ReconnectingOverlay
-            visible={showReconnecting}
-            attempt={reconnectAttempt || undefined}
-            reason={showReconnecting ? statusDetail : undefined}
+            }
           />
         </div>
 
-        {/* Bottom action bar */}
-        <div className="mx-auto mt-4 flex w-full max-w-[520px] items-center justify-center">
+        {/* Local self-view PiP — small portrait rounded tile, top-right.
+            Hidden when selfHidden (replaced by a small "show" pill). */}
+        {selfHidden ? (
+          <button
+            type="button"
+            onClick={() => setSelfHidden(false)}
+            className="absolute right-3 top-3 z-20 flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1.5 text-xs text-white backdrop-blur hover:bg-black/70"
+          >
+            <Eye className="size-4" />
+            Tampilkan kamera
+          </button>
+        ) : (
+          <div
+            data-vc="local"
+            className="absolute right-3 top-3 z-20 aspect-[3/4] w-24 overflow-hidden rounded-2xl border border-white/15 bg-black shadow-xl shadow-black/50 sm:w-28"
+          >
+            <VideoTile
+              stream={localStream}
+              mirror={false}
+              muted
+              objectCover={false}
+              aria-label={
+                sharing ? 'Your screen share' : `Your video, microphone ${micOn ? 'on' : 'off'}`
+              }
+              className="h-full w-full"
+              placeholder={
+                <div className="flex h-full w-full items-center justify-center bg-zinc-900">
+                  <span className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                </div>
+              }
+            />
+            <button
+              type="button"
+              aria-label="Sembunyikan kamera saya"
+              onClick={() => setSelfHidden(true)}
+              className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur hover:bg-black/70"
+            >
+              <EyeOff className="size-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Top-left utility buttons (tiny, subtle): mirror + PiP */}
+        <div className="absolute left-3 top-3 z-20 flex flex-col gap-2">
+          <button
+            type="button"
+            aria-label={mirror ? 'Nonaktifkan mirror kamera depan' : 'Aktifkan mirror kamera depan'}
+            aria-pressed={mirror && facing === 'user'}
+            title="Mirror kamera depan"
+            onClick={handleToggleMirror}
+            disabled={facing !== 'user' || sharing}
+            className={cn(
+              'flex size-9 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition hover:bg-black/60 disabled:opacity-30',
+              mirror && facing === 'user' && !sharing && 'text-primary',
+            )}
+          >
+            <FlipHorizontal className="size-5" />
+          </button>
+          <button
+            type="button"
+            aria-label={pipActive ? 'Keluar dari Picture-in-Picture' : 'Picture-in-Picture'}
+            aria-pressed={pipActive}
+            title="Picture-in-Picture"
+            onClick={togglePiP}
+            className={cn(
+              'flex size-9 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition hover:bg-black/60',
+              pipActive && 'text-primary',
+            )}
+          >
+            <Minimize2 className="size-5" />
+          </button>
+        </div>
+
+        {/* Waiting share card (only while alone) */}
+        {showWaiting && (
+          <div className="absolute inset-x-0 bottom-24 z-10 flex justify-center px-4">
+            <div className="w-full max-w-sm rounded-2xl bg-black/70 p-4 text-center text-white backdrop-blur">
+              <p className="text-sm text-white/80">Bagikan tautan ini ke teman Anda lewat chat apa pun:</p>
+              <div className="mt-2 break-all rounded-lg bg-white/10 px-3 py-2 text-xs font-mono">
+                {typeof window !== 'undefined' ? window.location.href : `/?room=${roomId}`}
+              </div>
+              <Button onClick={copyLink} size="sm" className="mt-3 w-full gap-2 rounded-lg">
+                {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                {copied ? 'Tautan disalin!' : 'Salin tautan'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <ReconnectingOverlay
+          visible={showReconnecting}
+          attempt={reconnectAttempt || undefined}
+          reason={showReconnecting ? statusDetail : undefined}
+        />
+
+        {/* Floating bottom control bar (Instagram-style: circular buttons, centered) */}
+        <div className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2">
           <CallControls
             micOn={micOn}
             camOn={camOn}
@@ -638,7 +598,7 @@ export function CallRoom() {
             canSwitchCamera
           />
         </div>
-      </main>
+      </div>
     </div>
   )
 }

@@ -544,3 +544,27 @@ Agent Browser verification (room MIRRORPIPE, 2 sessions, 1440px):
 
 Stage Summary:
 - Mirror now applies to the SENT stream (canvas pipeline) so the RECEIVER sees the mirrored front-camera feed (not just the local preview). Back camera never mirrored. In-call UI simplified to Instagram-like (video + minimal top bar with mirror/PiP + bottom 5 controls; no left rail/theme toggle). 2-peer call + reconnect intact.
+
+---
+Task ID: clean-ui-instagram
+Agent: main
+Task: Make the in-call UI as clean as the real Instagram VC scrape (ig2 = video + local PiP + 5 bottom controls only).
+
+Work Log:
+- Re-analyzed the scrape: Instagram in-call has NO top bar (no leave/timer/quality/room/theme), NO nav rail — just full-bleed remote video + a small local PiP (top-right) + 5 bottom control buttons. Removed all the clutter.
+- call-room.tsx in-call rewrite:
+  * Full-bleed remote video: wrapper is `h-[100dvh] w-full bg-black` with border-radius 0 (edge-to-edge, no rounding, no padding) — matches Instagram's edge-to-edge video.
+  * Local PiP: small portrait (`aspect-[3/4] w-24 sm:w-28`) rounded-2xl tile, top-right, with a tiny hide-eye button. object-contain (no zoom).
+  * Top-LEFT: two TINY (size-9) circular glassy buttons stacked — mirror (FlipHorizontal) + PiP (Minimize2). Subtle, preserves both features without a cluttered top bar.
+  * Bottom: the 5 CallControls FLOATING (`absolute bottom-6 left-1/2 -translate-x-1/2`), centered over the video (Instagram-style floating circular controls).
+  * REMOVED: the top status pill (timer + quality bars + room id), the top-left Leave button (End call = leave), the theme toggle, the "Teman"/"You" name tags, the separate bottom bar div, the wrapper rounding + padding.
+- Mirror pipeline (canvas, sent-stream mirrored) + reconnect + pre-join gate all intact.
+
+Agent Browser verification (room CLEANUI, 2 sessions, 1440px):
+- In-call elements: only "Nonaktifkan mirror kamera depan" + "Picture-in-Picture" (top-left tiny) + "Mute microphone" / "Turn off video" / "Share your screen" / "Enter full screen" / "End call" (bottom). NO Leave/timer/quality/theme/Teman/You. ✓
+- Remote wrapper: border-radius 0px (full-bleed), bg black. ✓
+- 2-peer connects: A remote ready=4, B remote ready=4 (mirror pipeline + floating controls don't break the connection). ✓
+- Lint clean, dev server + signaling 200.
+
+Stage Summary:
+- In-call UI now matches Instagram's clean aesthetic: edge-to-edge video + small local PiP (top-right) + 2 tiny utility buttons (mirror/PiP, top-left) + floating 5-button bottom control bar. No status pill, no leave button, no theme toggle, no nav rail. Mirror (canvas, sent-stream) + reconnect + pre-join all intact.
