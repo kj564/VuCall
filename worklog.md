@@ -307,3 +307,16 @@ Stage Summary:
 - Instagram-VC features (our own implementation) fully working on the Instagram-styled VuCall: in-call chat, floating reactions, photo capture, visual filters, network-quality bars, minimize-to-PiP.
 - The call still survives network blips (reconnection logic unchanged) + now has Instagram-like engagement features.
 - Both peers open the shared web link (Instagram bridge not possible — no API), but the experience mirrors Instagram video call.
+
+---
+Task ID: revert-ig
+Agent: main (orchestrator)
+Task: Revert the Instagram share integration back to clean VuCall.
+
+Work Log:
+- Removed `src/lib/share.ts` (the shareToInstagram helper).
+- call-room.tsx: removed `Instagram` lucide import + `shareToInstagram` import + `handleShareInstagram` handler; reverted top-bar (waiting) back to a single "Salin tautan" button; reverted waiting card back to a single full-width "Salin tautan" button; neutralized the helper text (dropped "lewat Instagram, WhatsApp").
+- Verified: lint clean, dev server 200, browser waiting screen shows only "Salin tautan" (0 Instagram references in call-room).
+
+Stage Summary:
+- VuCall is back to the clean version (WebRTC 1:1 call + Instagram-VC-style features: chat, reactions, filters, capture, quality, minimize). No Instagram integration remains.

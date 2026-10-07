@@ -9,7 +9,6 @@ import {
   Check,
   Copy,
   Heart,
-  Instagram,
   Minimize2,
   MessageCircle,
   PhoneOff,
@@ -19,7 +18,6 @@ import {
 import { Signaling, type IncomingSignal } from '@/lib/signaling'
 import { CallManager, type CallStatus } from '@/lib/webrtc'
 import { useVCStore } from '@/lib/vc-store'
-import { shareToInstagram } from '@/lib/share'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
@@ -235,19 +233,6 @@ export function CallRoom() {
     }
   }
 
-  async function handleShareInstagram() {
-    const url = typeof window !== 'undefined' ? window.location.href : `/?room=${roomId}`
-    const res = await shareToInstagram(url)
-    if (res === 'shared') {
-      toast({ title: 'Dibagikan', description: 'Tautan dikirim lewat Instagram.' })
-    } else if (res === 'copied') {
-      toast({
-        title: 'Tautan disalin',
-        description: 'Buka Instagram DM, lalu tempel tautannya.',
-      })
-    }
-  }
-
   const connected = status === 'connected'
   const showWaiting = status === 'waiting'
   const showReconnecting = status === 'reconnecting'
@@ -371,28 +356,17 @@ export function CallRoom() {
               <span className="font-mono uppercase tracking-wider">{roomId}</span>
             </span>
           </div>
-          <div className="pointer-events-auto flex items-center gap-2">
+          <div className="pointer-events-auto">
             {showWaiting ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Bagikan ke Instagram"
-                  className="rounded-full bg-black/40 text-white hover:bg-black/60"
-                  onClick={handleShareInstagram}
-                >
-                  <Instagram className="size-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={copyLink}
-                  className="gap-1.5 rounded-full bg-black/40 text-white hover:bg-black/60"
-                >
-                  {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                  {copied ? 'Disalin' : 'Salin'}
-                </Button>
-              </>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={copyLink}
+                className="gap-1.5 rounded-full bg-black/40 text-white hover:bg-black/60"
+              >
+                {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                {copied ? 'Tautan disalin' : 'Salin tautan'}
+              </Button>
             ) : (
               <Button
                 variant="ghost"
@@ -413,30 +387,20 @@ export function CallRoom() {
         <div className="absolute inset-x-0 bottom-40 z-10 flex justify-center px-4">
           <div className="w-full max-w-sm rounded-2xl bg-black/70 p-4 text-center text-white backdrop-blur">
             <p className="text-sm text-white/80">
-              Bagikan tautan ini ke teman Anda lewat Instagram, WhatsApp, atau apa pun:
+              Bagikan tautan ini ke teman Anda lewat chat apa pun:
             </p>
             <div className="mt-2 break-all rounded-lg bg-white/10 px-3 py-2 text-xs font-mono">
               {typeof window !== 'undefined' ? window.location.href : `/?room=${roomId}`}
             </div>
-            <div className="mt-3 flex gap-2">
-              <Button
-                onClick={handleShareInstagram}
-                size="sm"
-                className="flex-1 gap-2 rounded-full"
-              >
-                <Instagram className="size-4" />
-                Bagikan ke Instagram
-              </Button>
-              <Button
-                onClick={copyLink}
-                size="sm"
-                className="gap-2 rounded-full"
-                variant="secondary"
-              >
-                {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                {copied ? 'Disalin' : 'Salin'}
-              </Button>
-            </div>
+            <Button
+              onClick={copyLink}
+              size="sm"
+              className="mt-3 w-full gap-2 rounded-full"
+              variant="secondary"
+            >
+              {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+              {copied ? 'Tautan disalin!' : 'Salin tautan'}
+            </Button>
           </div>
         </div>
       )}
