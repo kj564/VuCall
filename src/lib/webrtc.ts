@@ -80,6 +80,16 @@ export class CallManager {
   private originalVideoTrack: MediaStreamTrack | null = null
   private sharing = false
   private screenStream: MediaStream | null = null
+  // Mirror pipeline — routes the camera video through a canvas that draws it
+  // horizontally flipped, so the SENT stream (not just the local preview) is
+  // mirrored. The receiver sees the mirrored feed.
+  private mirrorCanvas: HTMLCanvasElement | null = null
+  private mirrorVideo: HTMLVideoElement | null = null
+  private mirrorRaf = 0
+  private mirrorStream: MediaStream | null = null
+  private mirrorCleanup: (() => void) | null = null
+  private mirrored = false
+  private rawVideoTrack: MediaStreamTrack | null = null
 
   // Bound listeners for clean-up
   private onlineListener: (() => void) | null = null
@@ -471,6 +481,129 @@ export class CallManager {
   getFacing() {
     return this.mediaFacing
   }
+  /** The current local MediaStream (raw, or the mirror-canvas stream when mirrored). */
+  getLocalStream() {
+    return this.localStream
+  }
+
+  /**
+   * Mirror the SENT video stream by routing the camera through a canvas that
+   * draws it horizontally flipped. Both the local preview AND the peer's
+   * received stream are mirrored (not just a CSS flip on the preview).
+   * No-op for the back camera or while screen-sharing.
+   */
+  async setMirrored(enabled: boolean) {
+    if (enabled && this.mediaFacing !== 'user') return // back camera: never mirror
+    if (enabled && this.sharing) return // while sharing, mirror has no effect
+    if (enabled === this.mirrored) return
+    if (enabled) await this.startMirror()
+    else await this.stopMirror()
+  }
+
+  private async startMirror() {
+    if (!this.localStream || this.mirrored) return
+    const rawTrack = this.localStream.getVideoTracks()[0]
+    if (!rawTrack) return
+    // Hidden <video> bound to the raw camera track (so the canvas can draw it).
+    const video = document.createElement('video')
+    video.srcObject = new MediaStream([rawTrack])
+    video.muted = true
+    video.playsInline = true
+    video.autoplay = true
+    video.style.cssText =
+      'position:fixed;left:-9999px;top:-9999px;width:2px;height:2px;opacity:0;pointer-events:none'
+    document.body.appendChild(video)
+    try {
+      await video.play()
+    } catch {
+      /* autoplay may be blocked; draw loop still runs once frames arrive */
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = 640
+    canvas.height = 360
+    canvas.style.cssText =
+      'position:fixed;left:-9999px;top:-9999px;width:2px;height:2px;opacity:0;pointer-events:none'
+    document.body.appendChild(canvas)
+    const ctx = canvas.getContext('2d')!
+    const draw = () => {
+      if (video.videoWidth && video.videoHeight) {
+        if (canvas.width !== video.videoWidth) canvas.width = video.videoWidth
+        if (canvas.height !== video.videoHeight) canvas.height = video.videoHeight
+        ctx.save()
+        ctx.scale(-1, 1) // horizontal flip
+        ctx.drawImage(video, -canvas.width, 0)
+        ctx.restore()
+      }
+      this.mirrorRaf = requestAnimationFrame(draw)
+    }
+    draw()
+    const cs = canvas.captureStream(30)
+    const mirrorTrack = cs.getVideoTracks()[0]
+    if (!mirrorTrack) {
+      video.remove()
+      canvas.remove()
+      return
+    }
+    const sender = this.senders.find((s) => s.track?.kind === 'video')
+    this.rawVideoTrack = rawTrack
+    if (sender) {
+      try {
+        await sender.replaceTrack(mirrorTrack)
+      } catch {
+        /* ignore */
+      }
+    }
+    // New local stream: keep the audio tracks + the mirrored video.
+    const newStream = new MediaStream()
+    for (const t of this.localStream.getAudioTracks()) newStream.addTrack(t)
+    newStream.addTrack(mirrorTrack)
+    this.localStream = newStream
+    this.mirrorVideo = video
+    this.mirrorCanvas = canvas
+    this.mirrorStream = cs
+    this.mirrored = true
+    this.mirrorCleanup = () => {
+      cancelAnimationFrame(this.mirrorRaf)
+      try {
+        video.remove()
+      } catch {
+        /* ignore */
+      }
+      try {
+        canvas.remove()
+      } catch {
+        /* ignore */
+      }
+      try {
+        cs.getTracks().forEach((t) => t.stop())
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  private async stopMirror() {
+    if (!this.mirrored || !this.localStream) return
+    const sender = this.senders.find((s) => s.track?.kind === 'video')
+    if (this.rawVideoTrack && sender) {
+      try {
+        await sender.replaceTrack(this.rawVideoTrack)
+      } catch {
+        /* ignore */
+      }
+    }
+    const restored = new MediaStream()
+    for (const t of this.localStream.getAudioTracks()) restored.addTrack(t)
+    if (this.rawVideoTrack) restored.addTrack(this.rawVideoTrack)
+    this.localStream = restored
+    this.mirrorCleanup?.()
+    this.mirrorCleanup = null
+    this.mirrorVideo = null
+    this.mirrorCanvas = null
+    this.mirrorStream = null
+    this.rawVideoTrack = null
+    this.mirrored = false
+  }
 
   /** Whether the user is currently sharing their screen instead of the camera. */
   isScreenSharing() {
@@ -486,6 +619,9 @@ export class CallManager {
     if (this.sharing) {
       return this.stopScreenShare()
     }
+    // Stop the mirror canvas first so screen-share swaps from the RAW camera
+    // track (the call-room re-applies mirror after sharing stops if needed).
+    if (this.mirrored) await this.stopMirror()
     if (!this.localStream) return false
     const cameraTrack = this.localStream.getVideoTracks()[0]
     if (!cameraTrack) return false
@@ -564,7 +700,10 @@ export class CallManager {
   /** End the call and release all resources. */
   close() {
     this.clearReconnect()
-    // Stop any active screen-share first so the display-media track is released.
+    // Stop the mirror canvas + any active screen-share so all extra tracks are released.
+    if (this.mirrored) {
+      void this.stopMirror()
+    }
     if (this.sharing) {
       void this.stopScreenShare()
     }

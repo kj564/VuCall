@@ -523,3 +523,24 @@ Agent Browser verification:
 
 Stage Summary:
 - Mirror setting added: front camera mirrorable (default ON, toggleable in pre-join + in-call nav rail); back camera always default (unmirrored). Logic: mirror = facing==='user' && mirror && !sharing.
+
+---
+Task ID: mirror-sent + simplify-ui
+Agent: main
+Task: (1) Make mirror apply to the SENT stream (receiver sees mirrored) via a canvas pipeline. (2) Simplify the in-call UI to be Instagram-like.
+
+Work Log:
+- webrtc.ts CallManager: added a mirror CANVAS PIPELINE — setMirrored(enabled)/startMirror()/stopMirror()/getLocalStream(). When mirror ON (front cam, !sharing): a hidden <video> bound to the raw camera track is drawn onto a canvas with ctx.scale(-1,1) (horizontal flip); the canvas.captureStream video track replaces the video sender's track (replaceTrack, no renegotiation) so the PEER receives the mirrored feed. The local preview also shows the mirrored canvas stream. stopMirror restores the raw track. Back camera: never mirrored (setMirrored no-ops). Integrated with screen-share (stopMirror before share; call-room re-applies after share stops) + close() (cleanup).
+- call-room.tsx: handleToggleMirror now async — setMirror + manager.setMirrored(next) + setLocalStream(manager.getLocalStream()). On join (onConnect), applies mirror if setting on + front cam. handleSwitchCamera + handleToggleScreenShare re-apply mirror after their state changes. In-call local VideoTile CSS mirror = false (the canvas handles mirroring; avoids double-mirror).
+- UI SIMPLIFIED (Instagram-like): removed the left nav rail (Home/PiP/Hide-self/Mirror) + the in-call theme toggle. Now: full-screen remote video + a minimal top bar (leave / center status timer+quality+room / right: mirror + PiP) + a local PiP (with hide-eye) + the bottom 5-control bar. No clutter.
+- Pre-join: keeps the "Mirror kamera depan" switch (CSS preview); applies via canvas on join.
+
+Agent Browser verification (room MIRRORPIPE, 2 sessions, 1440px):
+- Simplified UI: top bar = Leave call + status + "Nonaktifkan mirror kamera depan" (mirror ON) + Picture-in-Picture; bottom = Mute microphone / Turn off video / Share your screen / Enter full screen / End call. NO left rail, NO theme toggle. ✓
+- Mirror pipeline active: local video src = MediaStream, ready=4 (the mirror canvas stream). ✓
+- 2-peer CONNECTS with mirror active: A remote ready=4, B remote ready=4, timer 0:10/0:10 in sync, no errors (replaceTrack didn't break the connection). ✓
+- Toggle mirror OFF→ON in-call: local stays ready=4, timer 0:51→0:53 (connection holds), no errors. ✓
+- Lint clean, dev server + signaling 200.
+
+Stage Summary:
+- Mirror now applies to the SENT stream (canvas pipeline) so the RECEIVER sees the mirrored front-camera feed (not just the local preview). Back camera never mirrored. In-call UI simplified to Instagram-like (video + minimal top bar with mirror/PiP + bottom 5 controls; no left rail/theme toggle). 2-peer call + reconnect intact.

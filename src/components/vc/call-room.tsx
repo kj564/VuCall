@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useTheme } from 'next-themes'
 import {
   ArrowLeft,
   Check,
@@ -10,13 +9,9 @@ import {
   Eye,
   EyeOff,
   FlipHorizontal,
-  Home,
   Minimize2,
-  Moon,
   PhoneOff,
-  PictureInPicture2,
   Share2,
-  Sun,
 } from 'lucide-react'
 import { Signaling, type IncomingSignal } from '@/lib/signaling'
 import { CallManager, acquireLocalMedia, type AcquiredMedia, type CallStatus } from '@/lib/webrtc'
@@ -35,7 +30,6 @@ export function CallRoom() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const roomId = searchParams.get('room') || ''
-  const { theme, setTheme } = useTheme()
   const { toast } = useToast()
 
   const {
@@ -158,12 +152,18 @@ export function CallRoom() {
         pendingSignals.current = []
 
         // Reuse the media acquired during pre-join (no re-prompt / double-acquire).
-        const stream = await manager.start(mediaRef.current ?? undefined)
+        await manager.start(mediaRef.current ?? undefined)
         if (disposed) {
           manager.close()
           return
         }
-        if (stream) setLocalStream(stream)
+        // Apply the front-camera mirror canvas (if enabled) so the SENT stream
+        // is mirrored from the start — the receiver sees it mirrored.
+        if (mirror && manager.getFacing() === 'user') {
+          await manager.setMirrored(true)
+        }
+        const ls = manager.getLocalStream()
+        if (ls) setLocalStream(ls)
       },
       onPeerJoined: () => managerRef.current?.onPeerJoined(),
       onPeerLeft: () => managerRef.current?.onPeerLeft(),
@@ -266,13 +266,28 @@ export function CallRoom() {
   }
   async function handleSwitchCamera() {
     await managerRef.current?.switchCamera()
-    // Sync the facing so the mirror logic + UI reflect front/back.
     setFacing(managerRef.current?.getFacing() ?? 'user')
+    // After switching, re-apply the mirror canvas if the front cam + setting on.
+    const m = managerRef.current
+    if (m) {
+      await m.setMirrored(mirror && m.getFacing() === 'user' && !sharing)
+      const ls = m.getLocalStream()
+      if (ls) setLocalStream(ls)
+    }
   }
 
-  /** Toggle the front-camera mirror setting (back camera is never mirrored). */
-  function handleToggleMirror() {
-    setMirror(!mirror)
+  /** Toggle the front-camera mirror — applies a canvas pipeline so the SENT
+   *  stream (not just the local preview) is mirrored. Back camera is never
+   *  mirrored. */
+  async function handleToggleMirror() {
+    const next = !mirror
+    setMirror(next)
+    const m = managerRef.current
+    if (m && facing === 'user' && !sharing) {
+      await m.setMirrored(next)
+      const ls = m.getLocalStream()
+      if (ls) setLocalStream(ls)
+    }
   }
 
   /** Instagram "Join call" — proceed from the pre-join screen into the call. */
@@ -313,14 +328,25 @@ export function CallRoom() {
   }
 
   /** "Share your screen" — swap the video sender's track for a display-media
-   *  track (no renegotiation needed). The local preview switches to the screen
-   *  too, and the camera is restored when sharing stops (including via the
-   *  browser's native "Stop sharing" bar). */
+   *  track. When sharing STOPS, re-apply the mirror canvas if the setting is on
+   *  (front cam) so the sent stream stays mirrored. */
   async function handleToggleScreenShare() {
+    const wasSharing = managerRef.current?.isScreenSharing() ?? false
     const ok = await managerRef.current?.toggleScreenShare()
-    setSharing(managerRef.current?.isScreenSharing() ?? false)
-    if (!ok) {
+    const nowSharing = managerRef.current?.isScreenSharing() ?? false
+    setSharing(nowSharing)
+    if (!ok && !wasSharing) {
       toast({ title: 'Tidak dapat berbagi layar.', description: 'Izinkan akses layar.' })
+    }
+    // If we just STOPPED sharing, restore the mirror canvas if applicable.
+    const m = managerRef.current
+    if (m && wasSharing && !nowSharing && mirror && m.getFacing() === 'user') {
+      await m.setMirrored(true)
+      const ls = m.getLocalStream()
+      if (ls) setLocalStream(ls)
+    } else if (m) {
+      const ls = m.getLocalStream()
+      if (ls) setLocalStream(ls)
     }
   }
 
@@ -422,68 +448,13 @@ export function CallRoom() {
     )
   }
 
-  // ---- Active call screen (repo 3-pane layout, adapted 1:1) ----
-  const navBtn =
-    'relative flex items-center justify-center text-muted-foreground transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded'
-
+  // ---- Active call screen (simple, Instagram-like: full-screen video + a
+  //  minimal top bar with leave / status / mirror / PiP, and a bottom control
+  //  bar). No left nav rail, no in-call theme toggle. ----
   return (
-    <div className="app-container relative flex h-[100dvh] w-full overflow-hidden bg-background">
-      {/* Mode switch (theme toggle) */}
-      <button
-        type="button"
-        aria-label="Ganti tema"
-        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-        className="mode-switch absolute left-4 top-5 z-40 flex size-9 items-center justify-center rounded-full bg-card vc-shadow"
-      >
-        {theme === 'dark' ? <Sun className="size-5 text-amber-400" /> : <Moon className="size-5 text-foreground" />}
-      </button>
-
-      {/* Left navigation rail */}
-      <aside className="left-side hidden min-w-[120px] shrink-0 flex-col items-center justify-center p-4 sm:flex">
-        <nav className="navigation flex flex-col gap-8 rounded-[10px] bg-card p-6 vc-shadow">
-          <button type="button" aria-label="Leave call" className={navBtn} onClick={handleEnd}>
-            <Home className="size-6" />
-          </button>
-
-          {/* Native Picture-in-Picture */}
-          <button
-            type="button"
-            aria-label={pipActive ? 'Keluar dari Picture-in-Picture' : 'Picture-in-Picture'}
-            aria-pressed={pipActive}
-            className={cn(navBtn, pipActive && 'text-primary')}
-            onClick={togglePiP}
-          >
-            <PictureInPicture2 className="size-6" />
-          </button>
-
-          {/* Hide / show self-view (like Instagram) */}
-          <button
-            type="button"
-            aria-label={selfHidden ? 'Tampilkan kamera saya' : 'Sembunyikan kamera saya'}
-            aria-pressed={selfHidden}
-            className={cn(navBtn, selfHidden && 'text-primary')}
-            onClick={() => setSelfHidden(!selfHidden)}
-          >
-            {selfHidden ? <EyeOff className="size-6" /> : <Eye className="size-6" />}
-          </button>
-
-          {/* Mirror front camera (back camera stays default / unmirrored) */}
-          <button
-            type="button"
-            aria-label={mirror ? 'Nonaktifkan mirror kamera depan' : 'Aktifkan mirror kamera depan'}
-            aria-pressed={mirror}
-            title="Mirror kamera depan"
-            className={cn(navBtn, mirror && facing === 'user' && 'text-primary')}
-            onClick={handleToggleMirror}
-            disabled={facing !== 'user'}
-          >
-            <FlipHorizontal className="size-6" />
-          </button>
-        </nav>
-      </aside>
-
+    <div className="relative flex h-[100dvh] w-full overflow-hidden bg-background">
       {/* Main: video area + bottom action bar */}
-      <main className="app-main flex flex-1 flex-col px-4 pb-4 pt-16 sm:px-8 sm:pt-[72px]">
+      <main className="flex flex-1 flex-col p-2 sm:p-4">
         <div
           ref={wrapperRef}
           className="video-call-wrapper relative w-full flex-1 overflow-hidden rounded-2xl bg-zinc-950"
@@ -543,7 +514,7 @@ export function CallRoom() {
             >
               <VideoTile
                 stream={localStream}
-                mirror={facing === 'user' && mirror && !sharing}
+                mirror={false}
                 muted
                 objectCover={false}
                 aria-label={
@@ -595,14 +566,30 @@ export function CallRoom() {
               <QualityBars quality={networkQuality} />
               <span className="font-mono text-xs uppercase tracking-wider text-white/80">{roomId}</span>
             </div>
-            {/* PiP quick button (mobile, since the nav rail is hidden < sm) */}
-            <div className="pointer-events-auto">
+            {/* Right: mirror (front cam) + Picture-in-Picture */}
+            <div className="pointer-events-auto flex items-center gap-2">
               <Button
                 variant="ghost"
                 size="icon"
-                aria-label="Picture-in-Picture"
+                aria-label={mirror ? 'Nonaktifkan mirror kamera depan' : 'Aktifkan mirror kamera depan'}
+                aria-pressed={mirror && facing === 'user'}
+                title="Mirror kamera depan"
                 className={cn(
-                  'rounded-full bg-black/40 text-white hover:bg-black/60 sm:hidden',
+                  'rounded-full bg-black/40 text-white hover:bg-black/60',
+                  mirror && facing === 'user' && !sharing && 'text-primary',
+                )}
+                onClick={handleToggleMirror}
+                disabled={facing !== 'user' || sharing}
+              >
+                <FlipHorizontal className="size-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={pipActive ? 'Keluar dari Picture-in-Picture' : 'Picture-in-Picture'}
+                aria-pressed={pipActive}
+                className={cn(
+                  'rounded-full bg-black/40 text-white hover:bg-black/60',
                   pipActive && 'text-primary',
                 )}
                 onClick={togglePiP}
