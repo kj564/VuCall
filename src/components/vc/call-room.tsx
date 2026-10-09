@@ -129,7 +129,6 @@ export function CallRoom() {
   const mediaRef = useRef<AcquiredMedia | null>(null)
   const mediaCleanupRef = useRef<(() => void) | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
-  const camOnRef = useRef(camOn)
   const [copied, setCopied] = useState(false)
   const [joined, setJoined] = useState(false)
   const [canSwitchCamera, setCanSwitchCamera] = useState(false)
