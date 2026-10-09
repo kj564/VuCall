@@ -2,13 +2,24 @@
 
 import type { Signaling } from './signaling'
 
-// Public STUN servers. For production behind restrictive NATs/corporate
-// firewalls, add TURN servers here (e.g. coturn) — without TURN, two peers
-// behind symmetric NATs cannot establish a direct media path.
+// STUN discovers possible direct routes; TURN relays media when NAT/firewalls
+// prevent a direct route. Configure TURN using server-side-issued, short-lived
+// credentials via NEXT_PUBLIC_TURN_URLS (comma-separated), TURN_USERNAME and
+// TURN_CREDENTIAL. Never expose a permanent TURN secret in public client env.
+const turnUrls = (process.env.NEXT_PUBLIC_TURN_URLS || '')
+  .split(',')
+  .map((url) => url.trim())
+  .filter(Boolean)
+const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME
+const turnCredential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL
+
 export const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
+  ...(turnUrls.length && turnUsername && turnCredential
+    ? [{ urls: turnUrls, username: turnUsername, credential: turnCredential }]
+    : []),
 ]
 
 export type CallStatus =
@@ -151,10 +162,33 @@ export class CallManager {
       this.senders.push(sender)
     }
 
+    const streamlessRemote = new MediaStream()
     pc.ontrack = (e) => {
-      console.log('[vc] ontrack', e.track.kind, 'streams:', e.streams.length)
+      // Most browsers include the stream passed to addTrack(), but WebRTC also
+      // permits streamless tracks. Preserve those tracks instead of rendering
+      // a null/black remote tile.
       const remote = e.streams[0]
-      this.handlers.onRemoteStream?.(remote ?? null)
+      if (remote) {
+        console.info('[vc] remote track received', {
+          kind: e.track.kind,
+          readyState: e.track.readyState,
+          muted: e.track.muted,
+          streamId: remote.id,
+        })
+        this.handlers.onRemoteStream?.(remote)
+      } else {
+        if (!streamlessRemote.getTracks().some((track) => track.id === e.track.id)) {
+          streamlessRemote.addTrack(e.track)
+        }
+        console.info('[vc] streamless remote track received', {
+          kind: e.track.kind,
+          readyState: e.track.readyState,
+          muted: e.track.muted,
+        })
+        this.handlers.onRemoteStream?.(streamlessRemote)
+      }
+      e.track.onunmute = () => console.info('[vc] remote track unmuted:', e.track.kind)
+      e.track.onmute = () => console.warn('[vc] remote track muted:', e.track.kind)
       if (this.status !== 'connected' && this.status !== 'reconnecting') {
         this.setStatus('connecting')
       }
@@ -203,7 +237,10 @@ export class CallManager {
 
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState
-      console.log('[vc] ice state:', state, '| signaling:', pc.signalingState)
+      console.log('[vc] ice state:', state, '| connection:', pc.connectionState, '| signaling:', pc.signalingState, '| gathering:', pc.iceGatheringState)
+      if (state === 'failed') {
+        console.error('[vc] ICE failed. Check TURN configuration; STUN-only may fail across restrictive networks.')
+      }
       this.emitQuality(state)
       if (state === 'connected' || state === 'completed') {
         this.clearReconnect()
