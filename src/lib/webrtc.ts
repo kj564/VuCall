@@ -731,9 +731,13 @@ export class CallManager {
   async setMirrored(enabled: boolean) {
     if (enabled && this.mediaFacing !== 'user') return // back camera: never mirror
     if (enabled && this.sharing) return // while sharing, mirror has no effect
-    if (enabled === this.mirrored) return
-    if (enabled) await this.startMirror()
-    else await this.stopMirror()
+
+    // Keep the original camera track as the outgoing WebRTC track. Replacing
+    // it with canvas.captureStream() caused black frames on some mobile
+    // browsers and could alter the transmitted aspect ratio. The local
+    // VideoTile applies a CSS mirror, which does not affect the sent track.
+    // Intentionally do not start/stop the canvas mirror pipeline here.
+    void enabled
   }
 
   private async startMirror() {
@@ -753,15 +757,43 @@ export class CallManager {
     try {
       await video.play()
     } catch {
-      // The drawing loop will start once camera frames become available.
+      // If the hidden source video cannot play, keep the raw camera track.
+      // Replacing it with an unpainted canvas would show a black screen.
+      video.srcObject = null
+      video.remove()
+      return
     }
 
-    // Keep the mirror pipeline at a fixed, lightweight resolution. Resizing
-    // this canvas to the camera's native resolution caused unnecessary memory
-    // use and per-frame work on high-resolution mobile cameras.
+    // Wait briefly for the first decoded camera frame before replacing the
+    // outgoing track. This prevents peers from receiving a blank canvas while
+    // mobile browsers are still initializing the camera.
+    if (!video.videoWidth || !video.videoHeight) {
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          window.clearTimeout(timeout)
+          video.removeEventListener('loadeddata', finish)
+          resolve()
+        }
+        const timeout = window.setTimeout(finish, 1200)
+        video.addEventListener('loadeddata', finish, { once: true })
+      })
+    }
+    if (!video.videoWidth || !video.videoHeight) {
+      video.srcObject = null
+      video.remove()
+      return
+    }
+
+    // Keep the source aspect ratio while bounding the canvas to 640×360.
+    // A fixed 16:9 canvas stretched 4:3 and portrait camera feeds.
+    const scale = Math.min(
+      640 / video.videoWidth,
+      360 / video.videoHeight,
+      1,
+    )
     const canvas = document.createElement('canvas')
-    canvas.width = 640
-    canvas.height = 360
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale))
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale))
     canvas.style.cssText =
       'position:fixed;left:-9999px;top:-9999px;width:2px;height:2px;opacity:0;pointer-events:none'
     document.body.appendChild(canvas)
@@ -774,16 +806,22 @@ export class CallManager {
       return
     }
 
-    // Draw at most 24 fps rather than repainting the canvas on every display
-    // refresh (often 60–120 fps). This lowers CPU/GPU work and avoids allocating
-    // a full-resolution canvas when the source camera is 720p or higher.
+    // Draw the first frame before creating/sending the captured stream so the
+    // remote peer never starts on an intentionally blank canvas.
+    const drawFrame = () => {
+      ctx.save()
+      ctx.translate(canvas.width, 0)
+      ctx.scale(-1, 1)
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      ctx.restore()
+    }
+    drawFrame()
+
+    // Draw at most 24 fps rather than repainting on every display refresh.
     let lastDrawAt = 0
     const draw = (now = 0) => {
       if (now - lastDrawAt >= 1000 / 24 && video.videoWidth && video.videoHeight) {
-        ctx.save()
-        ctx.scale(-1, 1)
-        ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height)
-        ctx.restore()
+        drawFrame()
         lastDrawAt = now
       }
       this.mirrorRaf = requestAnimationFrame(draw)
