@@ -23,6 +23,7 @@ export type JoinResult = { ok: boolean; youAreCaller: boolean; roomId: string }
 export type SignalingHandlers = {
   onConnect?: () => void
   onDisconnect?: () => void
+  onError?: (message: string) => void
   onPeerJoined?: (info: PeerJoinedInfo) => void
   onPeerLeft?: (info: PeerLeftInfo) => void
   onSignal?: (msg: IncomingSignal) => void
@@ -58,6 +59,7 @@ export class Signaling {
   private client: mqtt.MqttClient | null = null
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private knownPeers = new Set<string>()
+  private connectTimeout: ReturnType<typeof setTimeout> | null = null
 
   constructor(handlers: SignalingHandlers) {
     this.handlers = handlers
@@ -92,8 +94,18 @@ export class Signaling {
       will: { topic, payload: leavePayload, qos: 0, retain: false },
     })
     this.client = client
+    if (this.connectTimeout) clearTimeout(this.connectTimeout)
+    this.connectTimeout = setTimeout(() => {
+      if (!client.connected) {
+        this.handlers.onError?.('Server sinyal belum merespons. Coba muat ulang atau gunakan jaringan lain.')
+      }
+    }, 12000)
 
     client.on('connect', () => {
+      if (this.connectTimeout) {
+        clearTimeout(this.connectTimeout)
+        this.connectTimeout = null
+      }
       client.subscribe(topic, (err) => {
         if (err) {
           console.error('[signaling] subscribe error:', err)
@@ -122,7 +134,12 @@ export class Signaling {
     })
 
     client.on('close', () => this.handlers.onDisconnect?.())
-    client.on('error', (e) => console.error('[signaling] mqtt error:', e))
+    client.on('error', (e) => {
+      console.error('[signaling] mqtt error:', e)
+      if (!client.connected) {
+        this.handlers.onError?.('Tidak dapat terhubung ke server sinyal. Periksa internet atau coba lagi.')
+      }
+    })
 
     return { ok: true, youAreCaller: false, roomId: room }
   }
@@ -166,6 +183,10 @@ export class Signaling {
   }
 
   disconnect() {
+    if (this.connectTimeout) {
+      clearTimeout(this.connectTimeout)
+      this.connectTimeout = null
+    }
     if (this.pingTimer) {
       clearInterval(this.pingTimer)
       this.pingTimer = null
