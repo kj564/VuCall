@@ -627,7 +627,7 @@ export function CallRoom() {
           </button>
         )}
 
-        <div className="absolute left-3 top-3 z-20 flex items-center gap-2 rounded-lg bg-black/50 px-3 py-2 text-xs text-white/85">
+        <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg bg-black/50 px-3 py-2 text-xs text-white/85">
           <span className={cn('size-2 rounded-full', connected ? 'bg-emerald-400' : showReconnecting ? 'bg-amber-400' : 'bg-white/40')} />
           <span>{connected ? 'Terhubung' : showReconnecting ? 'Menyambungkan kembali' : showWaiting ? 'Menunggu' : 'Menghubungkan'}</span>
           {connected && (
@@ -647,11 +647,7 @@ export function CallRoom() {
         />
       </div>
 
-      <aside aria-label="Panel kontrol panggilan" className="z-30 flex w-[84px] shrink-0 flex-col items-center border-l border-white/10 bg-[#151619] px-2 py-3 sm:w-[104px] sm:px-3 sm:py-4">
-        <div className="mb-4 flex flex-col items-center gap-1">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-white/[0.08] text-sm font-semibold tracking-tight">V</div>
-          <span className="text-[10px] font-medium tracking-wide text-white/55">VuCall</span>
-        </div>
+      <div className="absolute left-3 top-3 z-30 flex flex-col items-center gap-2">
         <CallControls
           micOn={micOn}
           camOn={camOn}
@@ -668,11 +664,10 @@ export function CallRoom() {
           canSwitchCamera={canSwitchCamera}
           disabled={!joined || showFailed || showEnded}
         />
-        <button type="button" onClick={togglePiP} aria-label={pipActive ? 'Keluar dari Picture-in-Picture' : 'Picture-in-Picture'} title="Picture-in-Picture" className="mt-auto flex w-full flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] font-medium text-white/60 hover:bg-white/10 hover:text-white">
+        <button type="button" onClick={togglePiP} aria-label={pipActive ? 'Keluar dari Picture-in-Picture' : 'Picture-in-Picture'} aria-pressed={pipActive} title="Picture-in-Picture" className={cn('flex size-9 items-center justify-center rounded-full bg-black/40 text-white/85 backdrop-blur transition hover:bg-black/60', pipActive && 'text-primary')}>
           <Minimize2 className="size-5" />
-          <span>PiP</span>
         </button>
-      </aside>
+      </div>
     </div>
   )
 }
