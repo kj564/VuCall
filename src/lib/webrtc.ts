@@ -448,25 +448,58 @@ export class CallManager {
     if (!this.localStream) return false
     const oldTrack = this.localStream.getVideoTracks()[0]
     if (!oldTrack) return false
-    this.mediaFacing = this.mediaFacing === 'user' ? 'environment' : 'user'
+
+    // Stop the mirror canvas BEFORE switching — it references the old track.
+    const wasMirrored = this.mirrored
+    if (this.mirrored) {
+      await this.stopMirror()
+    }
+
+    const newFacing = this.mediaFacing === 'user' ? 'environment' : 'user'
+    this.mediaFacing = newFacing
+
     try {
+      // Use `ideal` (soft constraint) — `exact` fails on iOS Safari + some devices.
       const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: this.mediaFacing },
+        video: {
+          facingMode: { ideal: newFacing },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       })
       const newTrack = newStream.getVideoTracks()[0]
       if (!newTrack) return false
+
       const sender = this.senders.find((s) => s.track?.kind === 'video')
-      if (sender) {
-        await sender.replaceTrack(newTrack)
+      if (!sender) {
+        newTrack.stop()
+        return false
       }
+
+      // Replace the sender's track (no renegotiation needed).
+      await sender.replaceTrack(newTrack)
+
+      // Swap in the local stream (for the local preview).
       this.localStream.removeTrack(oldTrack)
       oldTrack.stop()
       this.localStream.addTrack(newTrack)
       newTrack.enabled = this.camEnabled
+
+      // Re-enable mirror if it was on + we're on the front camera.
+      if (wasMirrored && this.mediaFacing === 'user') {
+        await this.startMirror()
+      }
+
       return true
     } catch (e) {
       console.error('[webrtc] switchCamera failed:', e)
+      // Revert the facing on failure.
+      this.mediaFacing = this.mediaFacing === 'user' ? 'environment' : 'user'
+      // Re-enable mirror if it was on.
+      if (wasMirrored && this.mediaFacing === 'user') {
+        await this.startMirror()
+      }
       return false
     }
   }
