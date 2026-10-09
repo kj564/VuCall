@@ -173,6 +173,11 @@ export class CallManager {
     // Perfect negotiation: drive outgoing offers from negotiationneeded.
     pc.onnegotiationneeded = async () => {
       if (this.restartInProgress) return
+      // Only the impolite peer initiates the initial negotiation. If both
+      // browsers create offers at once, a public signaling broker can deliver
+      // a glare sequence that leaves both sides stuck in "connecting".
+      // The polite peer waits for the offer and answers it in handleSignal().
+      if (this.polite && pc.signalingState === 'stable') return
       // If we're processing a remote offer, the answer is created in
       // handleSignal — don't fire a competing offer.
       if (pc.signalingState === 'have-remote-offer') return
@@ -682,35 +687,8 @@ export class CallManager {
     if (sender) {
       try {
         await sender.replaceTrack(mirrorTrack)
-      } catch {
-        /* ignore */
-      }
-    }
-    // New local stream: keep the audio tracks + the mirrored video.
-    const newStream = new MediaStream()
-    for (const t of this.localStream.getAudioTracks()) newStream.addTrack(t)
-    newStream.addTrack(mirrorTrack)
-    this.localStream = newStream
-    this.mirrorVideo = video
-    this.mirrorCanvas = canvas
-    this.mirrorStream = cs
-    this.mirrored = true
-    this.mirrorCleanup = () => {
-      cancelAnimationFrame(this.mirrorRaf)
-      try {
-        video.remove()
-      } catch {
-        /* ignore */
-      }
-      try {
-        canvas.remove()
-      } catch {
-        /* ignore */
-      }
-      try {
-        cs.getTracks().forEach((t) => t.stop())
-      } catch {
-        /* ignore */
+      } catch (error) {
+        console.error('[vc] signal handling failed:', error)
       }
     }
   }
