@@ -656,8 +656,9 @@ export class CallManager {
       const newStream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: newFacing },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 640 },
+          height: { ideal: 360 },
+          frameRate: { ideal: 24, max: 30 },
         },
         audio: false,
       })
@@ -743,6 +744,9 @@ export class CallManager {
       // The drawing loop will start once camera frames become available.
     }
 
+    // Keep the mirror pipeline at a fixed, lightweight resolution. Resizing
+    // this canvas to the camera's native resolution caused unnecessary memory
+    // use and per-frame work on high-resolution mobile cameras.
     const canvas = document.createElement('canvas')
     canvas.width = 640
     canvas.height = 360
@@ -758,20 +762,23 @@ export class CallManager {
       return
     }
 
-    const draw = () => {
-      if (video.videoWidth && video.videoHeight) {
-        if (canvas.width !== video.videoWidth) canvas.width = video.videoWidth
-        if (canvas.height !== video.videoHeight) canvas.height = video.videoHeight
+    // Draw at most 24 fps rather than repainting the canvas on every display
+    // refresh (often 60–120 fps). This lowers CPU/GPU work and avoids allocating
+    // a full-resolution canvas when the source camera is 720p or higher.
+    let lastDrawAt = 0
+    const draw = (now = 0) => {
+      if (now - lastDrawAt >= 1000 / 24 && video.videoWidth && video.videoHeight) {
         ctx.save()
         ctx.scale(-1, 1)
-        ctx.drawImage(video, -canvas.width, 0)
+        ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height)
         ctx.restore()
+        lastDrawAt = now
       }
       this.mirrorRaf = requestAnimationFrame(draw)
     }
     draw()
 
-    const mirrorStream = canvas.captureStream(30)
+    const mirrorStream = canvas.captureStream(24)
     const mirrorTrack = mirrorStream.getVideoTracks()[0]
     if (!mirrorTrack) {
       cancelAnimationFrame(this.mirrorRaf)
@@ -1023,7 +1030,12 @@ export async function acquireLocalMedia(
   // 1. Try video.
   try {
     const vs = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      video: {
+        facingMode: { ideal: facingMode },
+        width: { ideal: 640 },
+        height: { ideal: 360 },
+        frameRate: { ideal: 24, max: 30 },
+      },
       audio: false,
     })
     for (const t of vs.getVideoTracks()) {
