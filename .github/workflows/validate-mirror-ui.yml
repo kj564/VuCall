@@ -1,0 +1,25 @@
+name: Validate mirror and minimal UI
+
+on:
+  push:
+    branches:
+      - fix/mirror-and-minimal-ui
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Build static export
+        env:
+          NEXT_PUBLIC_BASE_PATH: /VuCall
+          NEXT_PUBLIC_ICE_CONFIG_URL: https://vucall.ukhelda.workers.dev/ice-servers
+        run: bun run build
