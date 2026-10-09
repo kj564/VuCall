@@ -66,6 +66,7 @@ export class CallManager {
   private reconnecting = false
   private restartInProgress = false
   private disconnectedTimer: ReturnType<typeof setTimeout> | null = null
+  private qualityTimer: ReturnType<typeof setInterval> | null = null
   // Signals that arrived before the RTCPeerConnection was built — replayed
   // once buildPeerConnection() finishes so nothing gets dropped during the
   // getUserMedia/setup window.
@@ -126,6 +127,7 @@ export class CallManager {
 
     this.buildPeerConnection(stream)
     this.attachNetworkListeners()
+    this.startQualityMonitor()
     // Replay any signals that arrived while the peer connection was being set up.
     this.drainPendingSignals()
 
@@ -285,6 +287,82 @@ export class CallManager {
     } catch {
       // Glare / state errors are non-fatal — the polite peer's answer resolves
       // the negotiation. Logged silently to avoid noise.
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Connection quality monitor — use WebRTC transport/media stats, not ICE
+  // state alone, so users can see degradation before the call disconnects.
+  // -------------------------------------------------------------------------
+
+  private startQualityMonitor() {
+    if (this.qualityTimer) clearInterval(this.qualityTimer)
+    this.qualityTimer = setInterval(() => {
+      void this.measureConnectionQuality()
+    }, 3000)
+    void this.measureConnectionQuality()
+  }
+
+  private async measureConnectionQuality() {
+    const pc = this.pc
+    if (!pc || pc.connectionState === 'closed') return
+
+    try {
+      const stats = await pc.getStats()
+      let roundTripTime: number | undefined
+      let maxJitter = 0
+      let totalLost = 0
+      let totalReceived = 0
+
+      stats.forEach((report) => {
+        if (
+          report.type === 'candidate-pair' &&
+          (report.state === 'succeeded' || report.nominated) &&
+          typeof report.currentRoundTripTime === 'number'
+        ) {
+          roundTripTime = Math.max(roundTripTime ?? 0, report.currentRoundTripTime)
+        }
+
+        if (report.type === 'inbound-rtp' && !report.isRemote) {
+          if (typeof report.jitter === 'number') maxJitter = Math.max(maxJitter, report.jitter)
+          if (typeof report.packetsLost === 'number') totalLost += Math.max(0, report.packetsLost)
+          if (typeof report.packetsReceived === 'number') totalReceived += report.packetsReceived
+        }
+      })
+
+      let quality: NetworkQuality = 4
+      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
+        quality = 0
+      } else if (pc.iceConnectionState !== 'connected' && pc.iceConnectionState !== 'completed') {
+        quality = 2
+      }
+
+      if (typeof roundTripTime === 'number') {
+        if (roundTripTime > 0.8) quality = Math.min(quality, 1) as NetworkQuality
+        else if (roundTripTime > 0.45) quality = Math.min(quality, 2) as NetworkQuality
+        else if (roundTripTime > 0.25) quality = Math.min(quality, 3) as NetworkQuality
+      }
+      if (maxJitter > 0.08) quality = Math.min(quality, 1) as NetworkQuality
+      else if (maxJitter > 0.04) quality = Math.min(quality, 2) as NetworkQuality
+
+      const packetTotal = totalLost + totalReceived
+      if (packetTotal > 0) {
+        const lossRatio = totalLost / packetTotal
+        if (lossRatio > 0.12) quality = Math.min(quality, 1) as NetworkQuality
+        else if (lossRatio > 0.05) quality = Math.min(quality, 2) as NetworkQuality
+        else if (lossRatio > 0.02) quality = Math.min(quality, 3) as NetworkQuality
+      }
+
+      this.handlers.onQuality?.(quality)
+    } catch {
+      // Stats are best-effort and not supported consistently by every browser.
+    }
+  }
+
+  private stopQualityMonitor() {
+    if (this.qualityTimer) {
+      clearInterval(this.qualityTimer)
+      this.qualityTimer = null
     }
   }
 
@@ -745,6 +823,7 @@ export class CallManager {
   /** End the call and release all resources. */
   close() {
     this.clearReconnect()
+    this.stopQualityMonitor()
     // Stop the mirror canvas + any active screen-share so all extra tracks are released.
     if (this.mirrored) {
       void this.stopMirror()
