@@ -1,19 +1,7 @@
 import type { Metadata } from "next";
-import { DM_Sans, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/theme-provider";
-
-const dmSans = DM_Sans({
-  variable: "--font-dm-sans",
-  subsets: ["latin"],
-  weight: ["400", "500", "700"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "VuCall — Terhubung lewat video call",
@@ -45,9 +33,25 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="id" suppressHydrationWarning>
-      <body
-        className={`${dmSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
-      >
+      <head>
+        {/* Load DM Sans + Geist Mono via <link> tags instead of next/font/google.
+            The latter triggers a Turbopack resolution bug on the CI runner
+            ("next/font/google queries have exactly one entry") because the
+            weight: [...] array produces multiple @font-face declarations per
+            query. Loading via <link> sidesteps the bug entirely and keeps
+            the fonts available offline via the browser's font cache. */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossOrigin="anonymous"
+        />
+        <link
+          href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Geist+Mono:wght@400;500;600&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="antialiased bg-background text-foreground">
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"

@@ -47,6 +47,11 @@
    Light is the default; .dark applies the dark variant. */
 :root {
   --radius: 0.625rem;
+  /* Font families — previously set by next/font/google's `.variable` className
+     on <body>. Now loaded via <link> tags in layout.tsx (see comment there for
+     why we stopped using next/font/google — Turbopack CI bug). */
+  --font-dm-sans: 'DM Sans', system-ui, sans-serif;
+  --font-geist-mono: 'Geist Mono', ui-monospace, monospace;
   /* Light theme — repo default */
   --background: #eaebf5;        /* app-background */
   --foreground: #2c303a;       /* message-text */
