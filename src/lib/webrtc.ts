@@ -651,9 +651,10 @@ export class CallManager {
     const newFacing = this.mediaFacing === 'user' ? 'environment' : 'user'
     this.mediaFacing = newFacing
 
+    let candidateStream: MediaStream | null = null
     try {
       // Use `ideal` (soft constraint) — `exact` fails on iOS Safari + some devices.
-      const newStream = await navigator.mediaDevices.getUserMedia({
+      candidateStream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: newFacing },
           width: { ideal: 640 },
@@ -662,8 +663,12 @@ export class CallManager {
         },
         audio: false,
       })
-      const newTrack = newStream.getVideoTracks()[0]
-      if (!newTrack) return false
+      const newTrack = candidateStream.getVideoTracks()[0]
+      if (!newTrack) {
+        candidateStream.getTracks().forEach((track) => track.stop())
+        candidateStream = null
+        return false
+      }
 
       const sender = this.senders.find((s) => s.track?.kind === 'video')
       if (!sender) {
@@ -679,6 +684,9 @@ export class CallManager {
       oldTrack.stop()
       this.localStream.addTrack(newTrack)
       newTrack.enabled = this.camEnabled
+      // Ownership of the active track now belongs to localStream. Clear the
+      // temporary reference so the catch cleanup never stops a live camera.
+      candidateStream = null
 
       // Re-enable mirror if it was on + we're on the front camera.
       if (wasMirrored && this.mediaFacing === 'user') {
@@ -687,6 +695,10 @@ export class CallManager {
 
       return true
     } catch (e) {
+      // getUserMedia may succeed before replaceTrack fails. Stop that temporary
+      // stream on every failure so repeated camera switches cannot leak tracks.
+      candidateStream?.getTracks().forEach((track) => track.stop())
+      candidateStream = null
       console.error('[webrtc] switchCamera failed:', e)
       // Revert the facing on failure.
       this.mediaFacing = this.mediaFacing === 'user' ? 'environment' : 'user'
@@ -1109,20 +1121,26 @@ export function createSyntheticStream(): {
   const ctx = canvas.getContext('2d')!
   let raf = 0
   let t = 0
-  const draw = () => {
-    t += 0.02
-    const g = ctx.createLinearGradient(0, 0, canvas.width, canvas.height)
-    g.addColorStop(0, `hsl(${(t * 30) % 360}, 70%, 45%)`)
-    g.addColorStop(1, `hsl(${(t * 30 + 80) % 360}, 70%, 25%)`)
-    ctx.fillStyle = g
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    ctx.fillStyle = 'rgba(255,255,255,0.9)'
-    ctx.font = 'bold 34px system-ui, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.fillText('VuCall', canvas.width / 2, canvas.height / 2 - 6)
-    ctx.font = '14px system-ui, sans-serif'
-    ctx.fillStyle = 'rgba(255,255,255,0.7)'
-    ctx.fillText('No camera — synthetic preview', canvas.width / 2, canvas.height / 2 + 24)
+  let lastDrawAt = 0
+  const draw = (now = 0) => {
+    // This is only a fallback preview, so 12 fps is sufficient and avoids
+    // spending a full display-refresh loop on a synthetic animation.
+    if (now - lastDrawAt >= 1000 / 12) {
+      t += 0.02
+      const g = ctx.createLinearGradient(0, 0, canvas.width, canvas.height)
+      g.addColorStop(0, `hsl(${(t * 30) % 360}, 70%, 45%)`)
+      g.addColorStop(1, `hsl(${(t * 30 + 80) % 360}, 70%, 25%)`)
+      ctx.fillStyle = g
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'
+      ctx.font = 'bold 34px system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('VuCall', canvas.width / 2, canvas.height / 2 - 6)
+      ctx.font = '14px system-ui, sans-serif'
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'
+      ctx.fillText('No camera — synthetic preview', canvas.width / 2, canvas.height / 2 + 24)
+      lastDrawAt = now
+    }
     raf = requestAnimationFrame(draw)
   }
   draw()
