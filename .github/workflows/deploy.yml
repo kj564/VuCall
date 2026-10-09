@@ -34,6 +34,7 @@ jobs:
           # GitHub Pages serves at https://<user>.github.io/<repo>/
           # so the basePath must match the repo name.
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          NEXT_PUBLIC_ICE_CONFIG_URL: https://vucall.ukhelda.workers.dev/ice-servers
         run: bun run build
 
       - name: Upload artifact

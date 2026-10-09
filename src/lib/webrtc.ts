@@ -2,14 +2,63 @@
 
 import type { Signaling } from './signaling'
 
-// Public STUN servers. For production behind restrictive NATs/corporate
-// firewalls, add TURN servers here (e.g. coturn) — without TURN, two peers
-// behind symmetric NATs cannot establish a direct media path.
-export const ICE_SERVERS: RTCIceServer[] = [
+// STUN can help establish direct paths. For restrictive networks, VuCall
+// fetches short-lived TURN credentials from a trusted HTTPS endpoint (Cloudflare
+// Worker). Never put a permanent TURN API token in NEXT_PUBLIC_* variables.
+const ICE_CONFIG_URL = process.env.NEXT_PUBLIC_ICE_CONFIG_URL || ''
+
+const STUN_FALLBACK_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
 ]
+
+// Retained as a compatibility export for any code importing ICE_SERVERS.
+// CallManager uses getIceServers() so it can await the Worker response.
+export const ICE_SERVERS: RTCIceServer[] = STUN_FALLBACK_SERVERS
+
+type IceConfigResponse = {
+  iceServers?: RTCIceServer[]
+}
+
+async function getIceServers(): Promise<RTCIceServer[]> {
+  if (!ICE_CONFIG_URL) {
+    console.warn('[vc] NEXT_PUBLIC_ICE_CONFIG_URL is not set; using STUN-only fallback. TURN may be required on restrictive networks.')
+    return STUN_FALLBACK_SERVERS
+  }
+
+  const response = await fetch(ICE_CONFIG_URL, {
+    method: 'GET',
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`ICE configuration endpoint returned HTTP ${response.status}`)
+  }
+
+  const config = (await response.json()) as IceConfigResponse
+  if (!Array.isArray(config.iceServers) || config.iceServers.length === 0) {
+    throw new Error('ICE configuration endpoint returned no iceServers')
+  }
+
+  const hasUsableServer = config.iceServers.some((server) =>
+    Array.isArray(server.urls) ? server.urls.length > 0 : Boolean(server.urls),
+  )
+  if (!hasUsableServer) {
+    throw new Error('ICE configuration endpoint returned invalid server URLs')
+  }
+
+  console.info('[vc] loaded ICE server configuration', {
+    serverCount: config.iceServers.length,
+    hasTurn: config.iceServers.some((server) => {
+      const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+      return urls.some((url) => typeof url === 'string' && url.startsWith('turn'))
+    }),
+  })
+
+  return config.iceServers
+}
 
 export type CallStatus =
   | 'idle'
@@ -59,6 +108,8 @@ export class CallManager {
   // Buffered initial offer / candidates (until the peer is present)
   private pendingOffer: RTCSessionDescriptionInit | null = null
   private pendingCandidates: RTCIceCandidateInit[] = []
+  // ICE can arrive before the remote SDP is installed; buffer it until then.
+  private pendingRemoteCandidates: RTCIceCandidateInit[] = []
 
   // Reconnection bookkeeping
   private reconnectAttempts = 0
@@ -66,6 +117,8 @@ export class CallManager {
   private reconnecting = false
   private restartInProgress = false
   private disconnectedTimer: ReturnType<typeof setTimeout> | null = null
+  private qualityTimer: ReturnType<typeof setInterval> | null = null
+  private previousInboundPackets = new Map<string, { received: number; lost: number }>()
   // Signals that arrived before the RTCPeerConnection was built — replayed
   // once buildPeerConnection() finishes so nothing gets dropped during the
   // getUserMedia/setup window.
@@ -114,6 +167,17 @@ export class CallManager {
    *  the local camera immediately on mount, independent of signaling. */
   async start(prebuilt?: AcquiredMedia): Promise<MediaStream | null> {
     this.setStatus('requesting-media')
+    let iceServers: RTCIceServer[]
+    try {
+      iceServers = await getIceServers()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load ICE configuration'
+      console.error('[vc] failed to load ICE configuration:', message)
+      this.handlers.onError?.(message)
+      this.setStatus('failed', 'ice-config-failed')
+      throw error
+    }
+
     const acq = prebuilt ?? (await acquireLocalMedia(this.mediaFacing))
     this.usingSynthetic = acq.synthetic
     if (acq.synthetic && acq.cleanup) {
@@ -124,8 +188,9 @@ export class CallManager {
     this.micEnabled = true
     this.camEnabled = stream.getVideoTracks().length > 0
 
-    this.buildPeerConnection(stream)
+    this.buildPeerConnection(stream, iceServers)
     this.attachNetworkListeners()
+    this.startQualityMonitor()
     // Replay any signals that arrived while the peer connection was being set up.
     this.drainPendingSignals()
 
@@ -137,8 +202,8 @@ export class CallManager {
     return stream
   }
 
-  private buildPeerConnection(stream: MediaStream) {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+  private buildPeerConnection(stream: MediaStream, iceServers: RTCIceServer[]) {
+    const pc = new RTCPeerConnection({ iceServers })
     this.pc = pc
 
     for (const track of stream.getTracks()) {
@@ -146,10 +211,33 @@ export class CallManager {
       this.senders.push(sender)
     }
 
+    const streamlessRemote = new MediaStream()
     pc.ontrack = (e) => {
-      console.log('[vc] ontrack', e.track.kind, 'streams:', e.streams.length)
+      // Most browsers include the stream passed to addTrack(), but WebRTC also
+      // permits streamless tracks. Preserve those tracks instead of rendering
+      // a null/black remote tile.
       const remote = e.streams[0]
-      this.handlers.onRemoteStream?.(remote ?? null)
+      if (remote) {
+        console.info('[vc] remote track received', {
+          kind: e.track.kind,
+          readyState: e.track.readyState,
+          muted: e.track.muted,
+          streamId: remote.id,
+        })
+        this.handlers.onRemoteStream?.(remote)
+      } else {
+        if (!streamlessRemote.getTracks().some((track) => track.id === e.track.id)) {
+          streamlessRemote.addTrack(e.track)
+        }
+        console.info('[vc] streamless remote track received', {
+          kind: e.track.kind,
+          readyState: e.track.readyState,
+          muted: e.track.muted,
+        })
+        this.handlers.onRemoteStream?.(streamlessRemote)
+      }
+      e.track.onunmute = () => console.info('[vc] remote track unmuted:', e.track.kind)
+      e.track.onmute = () => console.warn('[vc] remote track muted:', e.track.kind)
       if (this.status !== 'connected' && this.status !== 'reconnecting') {
         this.setStatus('connecting')
       }
@@ -168,6 +256,11 @@ export class CallManager {
     // Perfect negotiation: drive outgoing offers from negotiationneeded.
     pc.onnegotiationneeded = async () => {
       if (this.restartInProgress) return
+      // Only the impolite peer initiates the initial negotiation. If both
+      // browsers create offers at once, a public signaling broker can deliver
+      // a glare sequence that leaves both sides stuck in "connecting".
+      // The polite peer waits for the offer and answers it in handleSignal().
+      if (this.polite && pc.signalingState === 'stable') return
       // If we're processing a remote offer, the answer is created in
       // handleSignal — don't fire a competing offer.
       if (pc.signalingState === 'have-remote-offer') return
@@ -184,9 +277,8 @@ export class CallManager {
             ? (pc.localDescription.toJSON() as RTCSessionDescriptionInit)
             : null
         }
-      } catch {
-        // A competing offer/answer may have interleaved (glare) — non-fatal;
-        // the glare is resolved by the polite peer in handleSignal.
+      } catch (error) {
+        console.error('[vc] negotiation failed:', error)
       } finally {
         this.makingOffer = false
       }
@@ -194,7 +286,10 @@ export class CallManager {
 
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState
-      console.log('[vc] ice state:', state, '| signaling:', pc.signalingState)
+      console.log('[vc] ice state:', state, '| connection:', pc.connectionState, '| signaling:', pc.signalingState, '| gathering:', pc.iceGatheringState)
+      if (state === 'failed') {
+        console.error('[vc] ICE failed. Check TURN configuration; STUN-only may fail across restrictive networks.')
+      }
       this.emitQuality(state)
       if (state === 'connected' || state === 'completed') {
         this.clearReconnect()
@@ -268,24 +363,122 @@ export class CallManager {
         if (this.ignoreOffer) return
 
         await pc.setRemoteDescription(desc)
+        // Trickle ICE may arrive before the offer/answer over MQTT.
+        const queuedCandidates = this.pendingRemoteCandidates.splice(0)
+        for (const candidate of queuedCandidates) {
+          try {
+            await pc.addIceCandidate(candidate)
+          } catch (candidateError) {
+            if (!this.ignoreOffer) console.warn('[webrtc] queued ICE candidate rejected:', candidateError)
+          }
+        }
         if (msg.type === 'offer') {
           const answer = await pc.createAnswer()
           await pc.setLocalDescription(answer)
           this.signaling.sendSignal('answer', pc.localDescription)
         }
       } else if (msg.type === 'ice') {
+        const candidate = msg.data as RTCIceCandidateInit
+        if (!pc.remoteDescription) {
+          this.pendingRemoteCandidates.push(candidate)
+          return
+        }
         try {
-          await pc.addIceCandidate(msg.data as RTCIceCandidateInit)
+          await pc.addIceCandidate(candidate)
         } catch (e) {
-          if (!this.ignoreOffer) throw e
+          if (!this.ignoreOffer) console.warn('[webrtc] ICE candidate rejected:', e)
         }
       } else if (msg.type === 'renegotiate-request') {
         await this.restartConnection('remote-request')
       }
-    } catch {
-      // Glare / state errors are non-fatal — the polite peer's answer resolves
-      // the negotiation. Logged silently to avoid noise.
+    } catch (error) {
+      // Surface signaling/SDP errors so a stuck connection can be diagnosed.
+      console.error('[vc] signal handling failed:', error)
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Connection quality monitor — use WebRTC transport/media stats, not ICE
+  // state alone, so users can see degradation before the call disconnects.
+  // -------------------------------------------------------------------------
+
+  private startQualityMonitor() {
+    if (this.qualityTimer) clearInterval(this.qualityTimer)
+    this.qualityTimer = setInterval(() => {
+      void this.measureConnectionQuality()
+    }, 3000)
+    void this.measureConnectionQuality()
+  }
+
+  private async measureConnectionQuality() {
+    const pc = this.pc
+    if (!pc || pc.connectionState === 'closed') return
+
+    try {
+      const stats = await pc.getStats()
+      let roundTripTime: number | undefined
+      let maxJitter = 0
+      let totalLost = 0
+      let totalReceived = 0
+
+      stats.forEach((report) => {
+        if (
+          report.type === 'candidate-pair' &&
+          (report.state === 'succeeded' || report.nominated) &&
+          typeof report.currentRoundTripTime === 'number'
+        ) {
+          roundTripTime = Math.max(roundTripTime ?? 0, report.currentRoundTripTime)
+        }
+
+        if (report.type === 'inbound-rtp' && !report.isRemote) {
+          if (typeof report.jitter === 'number') maxJitter = Math.max(maxJitter, report.jitter)
+
+          const received = typeof report.packetsReceived === 'number' ? report.packetsReceived : 0
+          const lost = typeof report.packetsLost === 'number' ? Math.max(0, report.packetsLost) : 0
+          const previous = this.previousInboundPackets.get(report.id)
+          if (previous) {
+            totalReceived += Math.max(0, received - previous.received)
+            totalLost += Math.max(0, lost - previous.lost)
+          }
+          this.previousInboundPackets.set(report.id, { received, lost })
+        }
+      })
+
+      let quality: NetworkQuality = 4
+      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
+        quality = 0
+      } else if (pc.iceConnectionState !== 'connected' && pc.iceConnectionState !== 'completed') {
+        quality = 2
+      }
+
+      if (typeof roundTripTime === 'number') {
+        if (roundTripTime > 0.8) quality = Math.min(quality, 1) as NetworkQuality
+        else if (roundTripTime > 0.45) quality = Math.min(quality, 2) as NetworkQuality
+        else if (roundTripTime > 0.25) quality = Math.min(quality, 3) as NetworkQuality
+      }
+      if (maxJitter > 0.08) quality = Math.min(quality, 1) as NetworkQuality
+      else if (maxJitter > 0.04) quality = Math.min(quality, 2) as NetworkQuality
+
+      const packetTotal = totalLost + totalReceived
+      if (packetTotal > 0) {
+        const lossRatio = totalLost / packetTotal
+        if (lossRatio > 0.12) quality = Math.min(quality, 1) as NetworkQuality
+        else if (lossRatio > 0.05) quality = Math.min(quality, 2) as NetworkQuality
+        else if (lossRatio > 0.02) quality = Math.min(quality, 3) as NetworkQuality
+      }
+
+      this.handlers.onQuality?.(quality)
+    } catch {
+      // Stats are best-effort and not supported consistently by every browser.
+    }
+  }
+
+  private stopQualityMonitor() {
+    if (this.qualityTimer) {
+      clearInterval(this.qualityTimer)
+      this.qualityTimer = null
+    }
+    this.previousInboundPackets.clear()
   }
 
   // -------------------------------------------------------------------------
@@ -339,15 +532,15 @@ export class CallManager {
 
   private async handleConnectionFailure(reason: string) {
     if (this.reconnecting) return
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      this.setStatus('failed', reason)
-      return
-    }
+    // A temporary network outage should not permanently end an LDR call.
+    // Keep retrying with a capped exponential backoff until the user ends the
+    // call or the peer explicitly leaves. Cap the displayed attempt counter so
+    // the UI remains readable during a long outage.
     this.reconnecting = true
-    this.reconnectAttempts += 1
+    this.reconnectAttempts = Math.min(this.reconnectAttempts + 1, this.maxReconnectAttempts)
     this.handlers.onReconnectAttempt?.(this.reconnectAttempts)
     this.setStatus('reconnecting', reason)
-    const delay = Math.min(8000, 1000 * 2 ** (this.reconnectAttempts - 1))
+    const delay = Math.min(15000, 1000 * 2 ** (this.reconnectAttempts - 1))
     await new Promise((r) => setTimeout(r, delay))
     try {
       await this.restartConnection(reason)
@@ -579,35 +772,8 @@ export class CallManager {
     if (sender) {
       try {
         await sender.replaceTrack(mirrorTrack)
-      } catch {
-        /* ignore */
-      }
-    }
-    // New local stream: keep the audio tracks + the mirrored video.
-    const newStream = new MediaStream()
-    for (const t of this.localStream.getAudioTracks()) newStream.addTrack(t)
-    newStream.addTrack(mirrorTrack)
-    this.localStream = newStream
-    this.mirrorVideo = video
-    this.mirrorCanvas = canvas
-    this.mirrorStream = cs
-    this.mirrored = true
-    this.mirrorCleanup = () => {
-      cancelAnimationFrame(this.mirrorRaf)
-      try {
-        video.remove()
-      } catch {
-        /* ignore */
-      }
-      try {
-        canvas.remove()
-      } catch {
-        /* ignore */
-      }
-      try {
-        cs.getTracks().forEach((t) => t.stop())
-      } catch {
-        /* ignore */
+      } catch (error) {
+        console.error('[vc] signal handling failed:', error)
       }
     }
   }
@@ -745,6 +911,7 @@ export class CallManager {
   /** End the call and release all resources. */
   close() {
     this.clearReconnect()
+    this.stopQualityMonitor()
     // Stop the mirror canvas + any active screen-share so all extra tracks are released.
     if (this.mirrored) {
       void this.stopMirror()

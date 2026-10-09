@@ -256,6 +256,12 @@ export function CallRoom() {
         if (disposed) return
         setStatus('waiting', 'menunggu teman bergabung')
       },
+      onError: (message: string) => {
+        if (disposed) return
+        setError(message)
+        setStatus('failed', 'signaling-error')
+        toast({ title: 'Gagal menghubungkan', description: message })
+      },
       onPeerJoined: (info: { from: string; polite: boolean }) => {
         if (disposed) return
         setRoom(roomId, info.polite ? 'callee' : 'caller')
@@ -882,6 +888,9 @@ export function CallRoom() {
               )}
             />
             <CallTimer startedAt={callStartedAt} running={connected} />
+            <span className="mx-1 h-3 w-px bg-white/20" aria-hidden="true" />
+            <QualityBars quality={networkQuality} />
+            <span className="sr-only">Kualitas jaringan</span>
             {recording && <span className="text-red-400">REC</span>}
           </div>
         )}

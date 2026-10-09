@@ -43,8 +43,8 @@ export function QualityBars({ quality }: QualityBarsProps) {
   return (
     <span
       role="status"
-      aria-label={`Connection quality: ${quality} of 4`}
-      title={`Connection: ${quality}/4`}
+      aria-label={`Kualitas jaringan: ${quality} dari 4`}
+      title={`Kualitas jaringan: ${quality}/4`}
       className="inline-flex items-end gap-0.5"
     >
       {heights.map((h, i) => {

@@ -28,8 +28,8 @@ export function ReconnectingOverlay({
   if (!visible) return null
 
   const subtitle = attempt
-    ? `Attempt ${attempt} — keeping the call alive`
-    : 'Network unstable — recovering'
+    ? `Percobaan sambung ulang ${attempt} · panggilan tetap disiapkan`
+    : 'Jaringan sedang tidak stabil · mencoba menyambung kembali'
 
   return (
     <div
@@ -43,11 +43,12 @@ export function ReconnectingOverlay({
           aria-hidden="true"
           className="mx-auto mb-3 size-8 animate-spin rounded-full border-2 border-white/30 border-t-white"
         />
-        <p className="text-white font-semibold">Reconnecting…</p>
+        <p className="text-white font-semibold">Menyambungkan kembali…</p>
         <p className="mt-1 text-sm text-white/80">{subtitle}</p>
         {reason && (
           <p className="mt-1 text-xs text-white/50">{reason}</p>
         )}
+        <p className="mt-3 max-w-xs text-xs leading-5 text-white/70">Coba dekatkan perangkat ke Wi-Fi atau pindah ke data seluler. Jangan tutup halaman agar panggilan bisa pulih.</p>
       </div>
     </div>
   )
