@@ -2,25 +2,63 @@
 
 import type { Signaling } from './signaling'
 
-// STUN discovers possible direct routes; TURN relays media when NAT/firewalls
-// prevent a direct route. Configure TURN using server-side-issued, short-lived
-// credentials via NEXT_PUBLIC_TURN_URLS (comma-separated), TURN_USERNAME and
-// TURN_CREDENTIAL. Never expose a permanent TURN secret in public client env.
-const turnUrls = (process.env.NEXT_PUBLIC_TURN_URLS || '')
-  .split(',')
-  .map((url) => url.trim())
-  .filter(Boolean)
-const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME
-const turnCredential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL
+// STUN can help establish direct paths. For restrictive networks, VuCall
+// fetches short-lived TURN credentials from a trusted HTTPS endpoint (Cloudflare
+// Worker). Never put a permanent TURN API token in NEXT_PUBLIC_* variables.
+const ICE_CONFIG_URL = process.env.NEXT_PUBLIC_ICE_CONFIG_URL || ''
 
-export const ICE_SERVERS: RTCIceServer[] = [
+const STUN_FALLBACK_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
-  ...(turnUrls.length && turnUsername && turnCredential
-    ? [{ urls: turnUrls, username: turnUsername, credential: turnCredential }]
-    : []),
 ]
+
+// Retained as a compatibility export for any code importing ICE_SERVERS.
+// CallManager uses getIceServers() so it can await the Worker response.
+export const ICE_SERVERS: RTCIceServer[] = STUN_FALLBACK_SERVERS
+
+type IceConfigResponse = {
+  iceServers?: RTCIceServer[]
+}
+
+async function getIceServers(): Promise<RTCIceServer[]> {
+  if (!ICE_CONFIG_URL) {
+    console.warn('[vc] NEXT_PUBLIC_ICE_CONFIG_URL is not set; using STUN-only fallback. TURN may be required on restrictive networks.')
+    return STUN_FALLBACK_SERVERS
+  }
+
+  const response = await fetch(ICE_CONFIG_URL, {
+    method: 'GET',
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`ICE configuration endpoint returned HTTP ${response.status}`)
+  }
+
+  const config = (await response.json()) as IceConfigResponse
+  if (!Array.isArray(config.iceServers) || config.iceServers.length === 0) {
+    throw new Error('ICE configuration endpoint returned no iceServers')
+  }
+
+  const hasUsableServer = config.iceServers.some((server) =>
+    Array.isArray(server.urls) ? server.urls.length > 0 : Boolean(server.urls),
+  )
+  if (!hasUsableServer) {
+    throw new Error('ICE configuration endpoint returned invalid server URLs')
+  }
+
+  console.info('[vc] loaded ICE server configuration', {
+    serverCount: config.iceServers.length,
+    hasTurn: config.iceServers.some((server) => {
+      const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+      return urls.some((url) => typeof url === 'string' && url.startsWith('turn'))
+    }),
+  })
+
+  return config.iceServers
+}
 
 export type CallStatus =
   | 'idle'
@@ -129,6 +167,17 @@ export class CallManager {
    *  the local camera immediately on mount, independent of signaling. */
   async start(prebuilt?: AcquiredMedia): Promise<MediaStream | null> {
     this.setStatus('requesting-media')
+    let iceServers: RTCIceServer[]
+    try {
+      iceServers = await getIceServers()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load ICE configuration'
+      console.error('[vc] failed to load ICE configuration:', message)
+      this.handlers.onError?.(message)
+      this.setStatus('failed', 'ice-config-failed')
+      throw error
+    }
+
     const acq = prebuilt ?? (await acquireLocalMedia(this.mediaFacing))
     this.usingSynthetic = acq.synthetic
     if (acq.synthetic && acq.cleanup) {
@@ -139,7 +188,7 @@ export class CallManager {
     this.micEnabled = true
     this.camEnabled = stream.getVideoTracks().length > 0
 
-    this.buildPeerConnection(stream)
+    this.buildPeerConnection(stream, iceServers)
     this.attachNetworkListeners()
     this.startQualityMonitor()
     // Replay any signals that arrived while the peer connection was being set up.
@@ -153,8 +202,8 @@ export class CallManager {
     return stream
   }
 
-  private buildPeerConnection(stream: MediaStream) {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+  private buildPeerConnection(stream: MediaStream, iceServers: RTCIceServer[]) {
+    const pc = new RTCPeerConnection({ iceServers })
     this.pc = pc
 
     for (const track of stream.getTracks()) {
