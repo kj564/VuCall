@@ -727,7 +727,7 @@ export class CallManager {
     if (!this.localStream || this.mirrored) return
     const rawTrack = this.localStream.getVideoTracks()[0]
     if (!rawTrack) return
-    // Hidden <video> bound to the raw camera track (so the canvas can draw it).
+
     const video = document.createElement('video')
     video.srcObject = new MediaStream([rawTrack])
     video.muted = true
@@ -736,46 +736,88 @@ export class CallManager {
     video.style.cssText =
       'position:fixed;left:-9999px;top:-9999px;width:2px;height:2px;opacity:0;pointer-events:none'
     document.body.appendChild(video)
+
     try {
       await video.play()
     } catch {
-      /* autoplay may be blocked; draw loop still runs once frames arrive */
+      // The drawing loop will start once camera frames become available.
     }
+
     const canvas = document.createElement('canvas')
     canvas.width = 640
     canvas.height = 360
     canvas.style.cssText =
       'position:fixed;left:-9999px;top:-9999px;width:2px;height:2px;opacity:0;pointer-events:none'
     document.body.appendChild(canvas)
-    const ctx = canvas.getContext('2d')!
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      video.srcObject = null
+      video.remove()
+      canvas.remove()
+      return
+    }
+
     const draw = () => {
       if (video.videoWidth && video.videoHeight) {
         if (canvas.width !== video.videoWidth) canvas.width = video.videoWidth
         if (canvas.height !== video.videoHeight) canvas.height = video.videoHeight
         ctx.save()
-        ctx.scale(-1, 1) // horizontal flip
+        ctx.scale(-1, 1)
         ctx.drawImage(video, -canvas.width, 0)
         ctx.restore()
       }
       this.mirrorRaf = requestAnimationFrame(draw)
     }
     draw()
-    const cs = canvas.captureStream(30)
-    const mirrorTrack = cs.getVideoTracks()[0]
+
+    const mirrorStream = canvas.captureStream(30)
+    const mirrorTrack = mirrorStream.getVideoTracks()[0]
     if (!mirrorTrack) {
+      cancelAnimationFrame(this.mirrorRaf)
+      video.srcObject = null
       video.remove()
       canvas.remove()
+      mirrorStream.getTracks().forEach((track) => track.stop())
       return
     }
+
     const sender = this.senders.find((s) => s.track?.kind === 'video')
-    this.rawVideoTrack = rawTrack
-    if (sender) {
-      try {
-        await sender.replaceTrack(mirrorTrack)
-      } catch (error) {
-        console.error('[vc] signal handling failed:', error)
-      }
+    if (!sender) {
+      cancelAnimationFrame(this.mirrorRaf)
+      video.srcObject = null
+      video.remove()
+      canvas.remove()
+      mirrorStream.getTracks().forEach((track) => track.stop())
+      return
     }
+
+    try {
+      await sender.replaceTrack(mirrorTrack)
+    } catch (error) {
+      console.error('[vc] unable to enable mirrored video:', error)
+      cancelAnimationFrame(this.mirrorRaf)
+      video.srcObject = null
+      video.remove()
+      canvas.remove()
+      mirrorStream.getTracks().forEach((track) => track.stop())
+      return
+    }
+
+    this.rawVideoTrack = rawTrack
+    this.mirrorVideo = video
+    this.mirrorCanvas = canvas
+    this.mirrorStream = mirrorStream
+    this.mirrorCleanup = () => {
+      cancelAnimationFrame(this.mirrorRaf)
+      this.mirrorRaf = 0
+      mirrorStream.getTracks().forEach((track) => track.stop())
+      video.pause()
+      video.srcObject = null
+      video.remove()
+      canvas.remove()
+    }
+    this.mirrored = true
   }
 
   private async stopMirror() {
