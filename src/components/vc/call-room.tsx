@@ -230,6 +230,12 @@ export function CallRoom() {
         if (disposed) return
         setStatus('waiting', 'menunggu teman bergabung')
       },
+      onError: (message: string) => {
+        if (disposed) return
+        setError(message)
+        setStatus('failed', 'signaling-error')
+        toast({ title: 'Gagal menghubungkan', description: message })
+      },
       onPeerJoined: (info: { from: string; polite: boolean }) => {
         if (disposed) return
         setRoom(roomId, info.polite ? 'callee' : 'caller')
