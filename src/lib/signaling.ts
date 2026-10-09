@@ -14,11 +14,29 @@ export type SignalType =
   | 'answer'
   | 'ice'
   | 'renegotiate-request'
+  | 'chat'
+  | 'reaction'
 
 export type PeerJoinedInfo = { from: string; polite: boolean }
 export type PeerLeftInfo = { from: string }
 export type IncomingSignal = { type: string; data: unknown; from: string }
 export type JoinResult = { ok: boolean; youAreCaller: boolean; roomId: string }
+
+/** A chat message received from a peer (text payload + timestamp). */
+export type ChatMessage = {
+  id: string
+  from: 'me' | 'peer' | 'system'
+  text: string
+  ts: number
+}
+
+/** A floating emoji reaction received from a peer. */
+export type ReactionEvent = {
+  id: string
+  emoji: string
+  from: 'me' | 'peer'
+  ts: number
+}
 
 export type SignalingHandlers = {
   onConnect?: () => void

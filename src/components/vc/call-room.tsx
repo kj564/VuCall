@@ -11,15 +11,21 @@ import {
   EyeOff,
   FlipHorizontal,
   Minimize2,
+  MessageCircle,
+  Camera,
   PhoneOff,
   Share2,
+  Smile,
   Square,
+  X,
 } from 'lucide-react'
 import { Signaling, type IncomingSignal } from '@/lib/signaling'
 import { CallManager, acquireLocalMedia, type AcquiredMedia, type CallStatus } from '@/lib/webrtc'
 import { useVCStore } from '@/lib/vc-store'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
+import { useSpeakingIndicator } from '@/hooks/use-speaking-indicator'
+import { captureVideoSnapshot } from '@/lib/snapshot'
 import { cn } from '@/lib/utils'
 import { VideoTile } from './video-tile'
 import { CallControls } from './call-controls'
@@ -27,6 +33,8 @@ import { ReconnectingOverlay } from './reconnecting-overlay'
 import { CallTimer } from './call-timer'
 import { QualityBars } from './quality-bars'
 import { PreJoin } from './pre-join'
+import { ChatPanel } from './chat-panel'
+import { ReactionPicker, ReactionsOverlay } from './reactions-overlay'
 
 // iOS Safari exposes Picture-in-Picture via webkit-prefixed methods that
 // aren't in the standard lib typings.
@@ -101,6 +109,11 @@ export function CallRoom() {
     mirror,
     facing,
     recording,
+    chatOpen,
+    chatMessages,
+    unreadCount,
+    reactions,
+    snapshotFlash,
     setRoom,
     setStatus,
     setLocalStream,
@@ -118,7 +131,15 @@ export function CallRoom() {
     setMirror,
     setFacing,
     setRecording,
+    setChatOpen,
+    pushChat,
+    clearChat,
+    markChatRead,
+    pushReaction,
+    dropReaction,
+    triggerSnapshotFlash,
   } = useVCStore()
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   // Derived status flags (declared up-front so the effects below can reference
   // them without hitting the temporal dead zone).
@@ -141,6 +162,11 @@ export function CallRoom() {
   const chunksRef = useRef<Blob[]>([])
   const [copied, setCopied] = useState(false)
   const [joined, setJoined] = useState(false)
+
+  // Active-speaker ring: pulses the local PiP when the local user speaks.
+  // Only enabled while in-call + mic on (after a user gesture, so AudioContext
+  // is allowed to start).
+  const isSpeaking = useSpeakingIndicator(localStream, joined && micOn)
 
   // Keep a ref in sync with the store's localStream so toggle handlers (which
   // run during pre-join, before the manager exists) can flip track.enabled.
@@ -233,12 +259,46 @@ export function CallRoom() {
       onPeerJoined: (info: { from: string; polite: boolean }) => {
         if (disposed) return
         setRoom(roomId, info.polite ? 'callee' : 'caller')
+        pushChat({
+          id: `sys-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+          from: 'system',
+          text: 'Teman bergabung ke panggilan',
+          ts: Date.now(),
+        })
         createManager(info.polite)
       },
       onPeerLeft: () => {
         managerRef.current?.onPeerLeft()
+        pushChat({
+          id: `sys-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+          from: 'system',
+          text: 'Teman meninggalkan panggilan',
+          ts: Date.now(),
+        })
       },
       onSignal: (msg: IncomingSignal) => {
+        // Chat + reactions are out-of-band signals (not WebRTC SDP/ICE).
+        if (msg.type === 'chat') {
+          const data = msg.data as { text?: string; ts?: number } | null
+          const text = String(data?.text ?? '').slice(0, 500)
+          if (text) {
+            pushChat({
+              id: `peer-${msg.from}-${data?.ts ?? Date.now()}`,
+              from: 'peer',
+              text,
+              ts: data?.ts ?? Date.now(),
+            })
+          }
+          return
+        }
+        if (msg.type === 'reaction') {
+          const emoji = String((msg.data as { emoji?: string } | null)?.emoji ?? '').slice(0, 4)
+          if (emoji) {
+            const id = `peer-${msg.from}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`
+            pushReaction({ id, emoji, from: 'peer', ts: Date.now() })
+          }
+          return
+        }
         if (managerRef.current) {
           void managerRef.current.handleSignal(msg)
         } else {
@@ -264,6 +324,10 @@ export function CallRoom() {
       signaling.disconnect()
       signalingRef.current = null
       pendingSignals.current = []
+      // Drop any chat/reaction state so the next room starts clean.
+      clearChat()
+      setChatOpen(false)
+      setPickerOpen(false)
     }
      
   }, [roomId, joined])
@@ -518,6 +582,38 @@ export function CallRoom() {
     }
   }
 
+  /** Snapshot — capture a PNG still of the remote video frame and download it.
+   *  Plays a brief shutter flash over the video so the user gets feedback. */
+  function handleSnapshot() {
+    const remoteVideo = document.querySelector<HTMLVideoElement>('[data-vc="remote"] video')
+    const ok = captureVideoSnapshot(remoteVideo)
+    triggerSnapshotFlash()
+    if (ok) {
+      toast({ title: 'Snapshot tersimpan', description: 'File PNG diunduh.' })
+    } else {
+      toast({ title: 'Belum ada video untuk di-snapshot.' })
+    }
+  }
+
+  /** Send a chat message — push locally (as 'me') + broadcast over MQTT. */
+  function handleSendChat(text: string) {
+    const ts = Date.now()
+    pushChat({
+      id: `me-${ts}-${Math.random().toString(36).slice(2, 6)}`,
+      from: 'me',
+      text,
+      ts,
+    })
+    signalingRef.current?.sendSignal('chat', { text, ts })
+  }
+
+  /** Send a floating emoji reaction — render locally (as 'me') + broadcast. */
+  function handleSendReaction(emoji: string) {
+    const id = `me-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    pushReaction({ id, emoji, from: 'me', ts: Date.now() })
+    signalingRef.current?.sendSignal('reaction', { emoji })
+  }
+
   /** Real, native Picture-in-Picture on the remote video (OS-level floating
    *  window that persists across tabs/apps — like FaceTime/WhatsApp on iOS).
    *  Tries the standard API then the iOS webkit variants. */
@@ -638,7 +734,9 @@ export function CallRoom() {
         </div>
 
         {/* Local self-view PiP — small portrait rounded tile, top-right.
-            Hidden when selfHidden (replaced by a small "show" pill). */}
+            Hidden when selfHidden (replaced by a small "show" pill).
+            Wrapped in an active-speaker ring that pulses when the local user
+            is speaking (Web Audio analyser on the mic stream). */}
         {selfHidden ? (
           <button
             type="button"
@@ -651,7 +749,12 @@ export function CallRoom() {
         ) : (
           <div
             data-vc="local"
-            className="absolute right-3 top-3 z-20 aspect-[3/4] w-24 overflow-hidden rounded-2xl border border-white/15 bg-black shadow-xl shadow-black/50 sm:w-28"
+            className={cn(
+              'absolute right-3 top-3 z-20 aspect-[3/4] w-24 overflow-hidden rounded-2xl border bg-black shadow-xl shadow-black/50 sm:w-28 transition-shadow',
+              isSpeaking && micOn
+                ? 'border-emerald-400/80 ring-4 ring-emerald-400/40'
+                : 'border-white/15',
+            )}
           >
             <VideoTile
               stream={localStream}
@@ -679,7 +782,8 @@ export function CallRoom() {
           </div>
         )}
 
-        {/* Top-left utility buttons (tiny, subtle): mirror + PiP + record */}
+        {/* Top-left utility buttons (tiny, subtle): mirror + PiP + record +
+            snapshot + chat + reactions. */}
         <div className="absolute left-3 top-3 z-20 flex flex-col gap-2">
           <button
             type="button"
@@ -721,6 +825,51 @@ export function CallRoom() {
           >
             {recording ? <Square className="size-4" /> : <Circle className="size-4" />}
           </button>
+          <button
+            type="button"
+            aria-label="Ambil snapshot"
+            title="Simpan frame sebagai PNG"
+            onClick={handleSnapshot}
+            disabled={!connected}
+            className="flex size-9 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition hover:bg-black/60 disabled:opacity-30"
+          >
+            <Camera className="size-5" />
+          </button>
+          <button
+            type="button"
+            aria-label={chatOpen ? 'Tutup chat' : 'Buka chat'}
+            aria-pressed={chatOpen}
+            title="Chat"
+            onClick={() => setChatOpen(!chatOpen)}
+            className={cn(
+              'relative flex size-9 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition hover:bg-black/60',
+              chatOpen && 'text-primary',
+            )}
+          >
+            <MessageCircle className="size-5" />
+            {unreadCount > 0 && (
+              <span
+                aria-label={`${unreadCount} pesan belum dibaca`}
+                className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-white"
+              >
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            aria-label={pickerOpen ? 'Tutup reactions' : 'Buka reactions'}
+            aria-pressed={pickerOpen}
+            title="Kirim reaction"
+            onClick={() => setPickerOpen((v) => !v)}
+            disabled={!connected}
+            className={cn(
+              'flex size-9 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition hover:bg-black/60 disabled:opacity-30',
+              pickerOpen && 'text-primary',
+            )}
+          >
+            <Smile className="size-5" />
+          </button>
         </div>
 
         {/* Minimal timer + recording indicator (top-center, subtle) */}
@@ -760,7 +909,10 @@ export function CallRoom() {
         />
 
         {/* Floating bottom control bar (Instagram-style: circular buttons, centered) */}
-        <div className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2">
+        <div className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 flex flex-col items-center gap-3">
+          {pickerOpen && connected && (
+            <ReactionPicker onSend={handleSendReaction} disabled={!connected} />
+          )}
           <CallControls
             micOn={micOn}
             camOn={camOn}
@@ -775,7 +927,47 @@ export function CallRoom() {
             canSwitchCamera
           />
         </div>
+
+        {/* Floating emoji reactions (Instagram-style) — both peers see them. */}
+        <ReactionsOverlay reactions={reactions} onDone={dropReaction} />
+
+        {/* Snapshot shutter flash — a brief white overlay so the user gets
+            visual feedback that the frame was captured. Driven by
+            `snapshotFlash` (epoch ms); self-fades via CSS animation. */}
+        {snapshotFlash > 0 && (
+          <SnapshotFlash key={snapshotFlash} ts={snapshotFlash} />
+        )}
+
+        {/* In-call chat side panel (Instagram/Messenger-style, slides in from
+            the right). Chat + reactions are out-of-band MQTT signals — works
+            on static hosting (no server needed). */}
+        <ChatPanel
+          open={chatOpen}
+          messages={chatMessages}
+          onClose={() => setChatOpen(false)}
+          onSend={handleSendChat}
+        />
       </div>
     </div>
+  )
+}
+
+/** A one-shot white shutter flash overlay. Mounts for 220ms after a snapshot,
+ *  then unmounts itself via the parent's key change (each new `ts` re-mounts). */
+function SnapshotFlash({ ts }: { ts: number }) {
+  // Mount for 220ms, then drop. The parent re-keys on each new ts so the
+  // element is recreated (and the CSS animation re-triggers) for every shot.
+  const [show, setShow] = useState(true)
+  useEffect(() => {
+    const id = window.setTimeout(() => setShow(false), 220)
+    return () => window.clearTimeout(id)
+  }, [ts])
+  if (!show) return null
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 z-30 bg-white"
+      style={{ animation: 'vucall-flash 220ms ease-out forwards' }}
+    />
   )
 }

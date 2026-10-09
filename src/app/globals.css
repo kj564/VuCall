@@ -142,6 +142,13 @@
     background-color: rgba(0, 15, 47, 0.5);
   }
 
+  /* Snapshot shutter flash — used by the in-call "snapshot" button to give the
+     user a brief white flash so they know the frame was captured. */
+  @keyframes vucall-flash {
+    0%   { opacity: 0.85; }
+    100% { opacity: 0; }
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: var(--muted-foreground) transparent;
