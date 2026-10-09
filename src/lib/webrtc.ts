@@ -211,33 +211,38 @@ export class CallManager {
       this.senders.push(sender)
     }
 
-    const streamlessRemote = new MediaStream()
+    // Aggregate every incoming audio/video track into one stable MediaStream.
+    // Some browsers expose separate stream objects (or no stream at all) for
+    // each track; swapping the UI between those objects can leave remote media
+    // black or silent even though the RTCPeerConnection delivered the tracks.
+    const remoteMedia = new MediaStream()
     pc.ontrack = (e) => {
-      // Most browsers include the stream passed to addTrack(), but WebRTC also
-      // permits streamless tracks. Preserve those tracks instead of rendering
-      // a null/black remote tile.
-      const remote = e.streams[0]
-      if (remote) {
-        console.info('[vc] remote track received', {
-          kind: e.track.kind,
-          readyState: e.track.readyState,
-          muted: e.track.muted,
-          streamId: remote.id,
-        })
-        this.handlers.onRemoteStream?.(remote)
-      } else {
-        if (!streamlessRemote.getTracks().some((track) => track.id === e.track.id)) {
-          streamlessRemote.addTrack(e.track)
-        }
-        console.info('[vc] streamless remote track received', {
-          kind: e.track.kind,
-          readyState: e.track.readyState,
-          muted: e.track.muted,
-        })
-        this.handlers.onRemoteStream?.(streamlessRemote)
+      if (!remoteMedia.getTracks().some((track) => track.id === e.track.id)) {
+        remoteMedia.addTrack(e.track)
       }
-      e.track.onunmute = () => console.info('[vc] remote track unmuted:', e.track.kind)
+      console.info('[vc] remote track received', {
+        kind: e.track.kind,
+        readyState: e.track.readyState,
+        muted: e.track.muted,
+        enabled: e.track.enabled,
+        streamIds: e.streams.map((stream) => stream.id),
+        remoteTracks: remoteMedia.getTracks().map((track) => ({
+          kind: track.kind,
+          readyState: track.readyState,
+          muted: track.muted,
+          enabled: track.enabled,
+        })),
+      })
+      this.handlers.onRemoteStream?.(remoteMedia)
+      e.track.onunmute = () => {
+        console.info('[vc] remote track unmuted:', e.track.kind)
+        this.handlers.onRemoteStream?.(remoteMedia)
+      }
       e.track.onmute = () => console.warn('[vc] remote track muted:', e.track.kind)
+      e.track.onended = () => {
+        console.warn('[vc] remote track ended:', e.track.kind)
+        this.handlers.onRemoteStream?.(remoteMedia)
+      }
       if (this.status !== 'connected' && this.status !== 'reconnecting') {
         this.setStatus('connecting')
       }
