@@ -339,15 +339,15 @@ export class CallManager {
 
   private async handleConnectionFailure(reason: string) {
     if (this.reconnecting) return
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      this.setStatus('failed', reason)
-      return
-    }
+    // A temporary network outage should not permanently end an LDR call.
+    // Keep retrying with a capped exponential backoff until the user ends the
+    // call or the peer explicitly leaves. Cap the displayed attempt counter so
+    // the UI remains readable during a long outage.
     this.reconnecting = true
-    this.reconnectAttempts += 1
+    this.reconnectAttempts = Math.min(this.reconnectAttempts + 1, this.maxReconnectAttempts)
     this.handlers.onReconnectAttempt?.(this.reconnectAttempts)
     this.setStatus('reconnecting', reason)
-    const delay = Math.min(8000, 1000 * 2 ** (this.reconnectAttempts - 1))
+    const delay = Math.min(15000, 1000 * 2 ** (this.reconnectAttempts - 1))
     await new Promise((r) => setTimeout(r, delay))
     try {
       await this.restartConnection(reason)
