@@ -159,12 +159,6 @@ export function CallRoom() {
     localStreamRef.current = localStream
   }, [localStream])
 
-  // Keep camOn in a ref so the visibilitychange listener reads the latest value
-  // without re-attaching on every toggle.
-  useEffect(() => {
-    camOnRef.current = camOn
-  }, [camOn])
-
   // Acquire local media on mount (for the pre-join preview + reuse when joined).
   // Done BEFORE signaling so the user sees their camera instantly, independent
   // of the signaling socket (which may be slow/blocked in an iframe).
@@ -327,37 +321,8 @@ export function CallRoom() {
     return () => document.removeEventListener('fullscreenchange', onFsChange)
   }, [])
 
-  // FaceTime/WhatsApp-style background handling:
-  // 1. Try native Picture-in-Picture (floats over other apps like FaceTime).
-  // 2. If PiP fails/unsupported (iOS Safari), disable the LOCAL video track to
-  //    save battery + bandwidth — audio continues (like WhatsApp Web). When the
-  //    user returns, restore video if it was on.
-  useEffect(() => {
-    if (typeof document === 'undefined') return
-    const onVis = async () => {
-      if (!connected) return
-      if (document.hidden) {
-        // Page hidden — try PiP first (FaceTime-like floating window).
-        if (!document.pictureInPictureElement) {
-          const v = document.querySelector<HTMLVideoElement>('[data-vc="remote"] video')
-          if (v) {
-            const ok = await enterPiP(v).catch(() => false)
-            if (ok) return // PiP succeeded — video continues in the floating window.
-          }
-        }
-        // PiP failed/unsupported — disable local video (audio continues).
-        const videoTrack = localStreamRef.current?.getVideoTracks()[0]
-        if (videoTrack) videoTrack.enabled = false
-      } else {
-        // Page visible again — restore video if it was on.
-        const videoTrack = localStreamRef.current?.getVideoTracks()[0]
-        if (videoTrack && camOnRef.current) videoTrack.enabled = true
-      }
-    }
-    document.addEventListener('visibilitychange', onVis)
-    return () => document.removeEventListener('visibilitychange', onVis)
-     
-  }, [connected])
+  // Picture-in-Picture is user-initiated only. Switching tabs or apps must not
+  // force PiP or silently disable the camera track.
 
   function handleEnd() {
     if (typeof document !== 'undefined') {
