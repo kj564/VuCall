@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   ArrowLeft,
@@ -258,22 +258,30 @@ export function CallRoom() {
   // Attach native Picture-in-Picture listeners to the remote <video> so the
   // toolbar reflects real OS PiP state (e.g. when the user closes the floating
   // window from the OS). Re-attach when the remote stream changes.
+  // Fix: use STABLE named handlers (not inline arrows) so removeEventListener
+  // actually matches the ones added (audit finding: memory leak from mismatched
+  // arrow functions).
+  const onEnterPiP = React.useRef(() => {})
+  const onLeavePiP = React.useRef(() => {})
+  useEffect(() => {
+    onEnterPiP.current = () => setPipActive(true)
+    onLeavePiP.current = () => setPipActive(false)
+  }, [])
   useEffect(() => {
     if (typeof document === 'undefined') return
     let v: HTMLVideoElement | null
     const attach = () => {
       v = document.querySelector<HTMLVideoElement>('[data-vc="remote"] video')
       if (!v) return
-      v.addEventListener('enterpictureinpicture', () => setPipActive(true))
-      v.addEventListener('leavepictureinpicture', () => setPipActive(false))
+      v.addEventListener('enterpictureinpicture', onEnterPiP.current)
+      v.addEventListener('leavepictureinpicture', onLeavePiP.current)
     }
-    // Wait a tick for the VideoTile to mount its <video> after remoteStream lands.
     const id = window.setTimeout(attach, 120)
     return () => {
       window.clearTimeout(id)
       if (v) {
-        v.removeEventListener('enterpictureinpicture', () => setPipActive(true))
-        v.removeEventListener('leavepictureinpicture', () => setPipActive(false))
+        v.removeEventListener('enterpictureinpicture', onEnterPiP.current)
+        v.removeEventListener('leavepictureinpicture', onLeavePiP.current)
       }
     }
      
