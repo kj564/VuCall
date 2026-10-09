@@ -67,6 +67,7 @@ export class CallManager {
   private restartInProgress = false
   private disconnectedTimer: ReturnType<typeof setTimeout> | null = null
   private qualityTimer: ReturnType<typeof setInterval> | null = null
+  private previousInboundPackets = new Map<string, { received: number; lost: number }>()
   // Signals that arrived before the RTCPeerConnection was built — replayed
   // once buildPeerConnection() finishes so nothing gets dropped during the
   // getUserMedia/setup window.
@@ -325,8 +326,15 @@ export class CallManager {
 
         if (report.type === 'inbound-rtp' && !report.isRemote) {
           if (typeof report.jitter === 'number') maxJitter = Math.max(maxJitter, report.jitter)
-          if (typeof report.packetsLost === 'number') totalLost += Math.max(0, report.packetsLost)
-          if (typeof report.packetsReceived === 'number') totalReceived += report.packetsReceived
+
+          const received = typeof report.packetsReceived === 'number' ? report.packetsReceived : 0
+          const lost = typeof report.packetsLost === 'number' ? Math.max(0, report.packetsLost) : 0
+          const previous = this.previousInboundPackets.get(report.id)
+          if (previous) {
+            totalReceived += Math.max(0, received - previous.received)
+            totalLost += Math.max(0, lost - previous.lost)
+          }
+          this.previousInboundPackets.set(report.id, { received, lost })
         }
       })
 
@@ -364,6 +372,7 @@ export class CallManager {
       clearInterval(this.qualityTimer)
       this.qualityTimer = null
     }
+    this.previousInboundPackets.clear()
   }
 
   // -------------------------------------------------------------------------
