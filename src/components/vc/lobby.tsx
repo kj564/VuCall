@@ -11,7 +11,7 @@ import {
   Plus,
   ShieldCheck,
   Sparkles,
-  Users,
+  Heart,
   Video,
   Wifi,
   Zap,
@@ -22,9 +22,9 @@ function genRoomId(): string {
 }
 
 const highlights = [
-  { icon: Wifi, title: 'Audio & video real-time', detail: 'Terhubung langsung lewat WebRTC.' },
+  { icon: Wifi, title: 'Tetap terhubung', detail: 'Panggilan langsung untuk momen berdua.' },
   { icon: ShieldCheck, title: 'Kontrol tetap di tanganmu', detail: 'Atur kamera dan mikrofon sebelum masuk.' },
-  { icon: Zap, title: 'Siap saat dibutuhkan', detail: 'Bagikan link agar teman bisa bergabung.' },
+  { icon: Zap, title: 'Mudah untuk memulai', detail: 'Kirim satu tautan, lalu ngobrol bersama.' },
 ]
 
 export function Lobby() {
@@ -75,7 +75,7 @@ export function Lobby() {
         </a>
         <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-300 sm:flex">
           <span className="size-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.7)]" />
-          Ruang ngobrolmu, satu klik
+          Lebih dekat meski berjauhan
         </div>
       </header>
 
@@ -90,7 +90,7 @@ export function Lobby() {
             <span className="block bg-gradient-to-r from-blue-300 via-sky-400 to-violet-300 bg-clip-text pb-2 text-transparent">lebih dekat.</span>
           </h1>
           <p className="mt-5 max-w-lg text-base leading-7 text-slate-300 sm:text-lg">
-            Mulai panggilan video, bagikan tautan, dan bertemu tatap muka secara online tanpa alur yang rumit.
+            Tempat untuk pasangan LDR saling menyapa lewat video call 1:1—lebih sederhana untuk memulai, dengan upaya menyambung kembali saat jaringan terputus.
           </p>
 
           <div className="mt-9 grid gap-4 sm:grid-cols-2">
@@ -99,16 +99,16 @@ export function Lobby() {
                 <Video className="size-5" aria-hidden="true" />
               </div>
               <p className="font-semibold">Video call 1:1</p>
-              <p className="mt-1 text-sm leading-5 text-slate-400">Panggilan video dengan kontrol kamera dan mikrofon.</p>
+              <p className="mt-1 text-sm leading-5 text-slate-400">Tatap muka berdua, dengan kontrol kamera dan mikrofon.</p>
               <span className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-300"><Check className="size-3.5" /> Tersedia</span>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 backdrop-blur">
               <div className="mb-3 flex size-10 items-center justify-center rounded-xl bg-violet-500/15 text-violet-300">
-                <Users className="size-5" aria-hidden="true" />
+                <Heart className="size-5" aria-hidden="true" />
               </div>
-              <p className="font-semibold">Panggilan grup</p>
-              <p className="mt-1 text-sm leading-5 text-slate-400">Ruang bersama untuk lebih banyak teman.</p>
-              <span className="mt-3 inline-flex rounded-full border border-white/10 px-2.5 py-1 text-xs text-slate-400">Tahap pengembangan</span>
+              <p className="font-semibold">Dibuat untuk pasangan LDR</p>
+              <p className="mt-1 text-sm leading-5 text-slate-400">Ruang privat untuk ngobrol, melepas rindu, dan berbagi cerita dari jauh.</p>
+              <span className="mt-3 inline-flex rounded-full border border-white/10 px-2.5 py-1 text-xs text-slate-400">Fokus VuCall</span>
             </div>
           </div>
 
@@ -134,7 +134,7 @@ export function Lobby() {
                 <div>
                   <p className="text-sm font-medium text-blue-300">MULAI DI SINI</p>
                   <h2 className="mt-2 text-2xl font-semibold tracking-tight">Siap untuk terhubung?</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">Buat ruang baru atau masukkan kode dari temanmu.</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">Buat ruang untuk kalian berdua atau masukkan kode undangan pasanganmu.</p>
                 </div>
                 <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-blue-300">
                   <MessageCircle className="size-5" aria-hidden="true" />
@@ -151,7 +151,7 @@ export function Lobby() {
                   spellCheck={false}
                   value={roomName}
                   onChange={(e) => setRoomName(e.target.value)}
-                  placeholder="contoh: ngobrol-sore"
+                  placeholder="contoh: kita-malam-ini"
                   maxLength={30}
                   className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-4 py-3.5 text-sm text-white outline-none transition placeholder:text-slate-600 hover:border-white/20 focus:border-blue-400 focus:ring-4 focus:ring-blue-400/10"
                 />
@@ -177,7 +177,7 @@ export function Lobby() {
                   spellCheck={false}
                   value={roomName}
                   onChange={(e) => setRoomName(e.target.value)}
-                  placeholder="Masukkan kode ruang"
+                  placeholder="Masukkan kode pasangan"
                   aria-label="Kode ruang untuk bergabung"
                   maxLength={30}
                   className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#0b1020] px-4 py-3.5 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-blue-400 focus:ring-4 focus:ring-blue-400/10"
