@@ -731,9 +731,13 @@ export class CallManager {
   async setMirrored(enabled: boolean) {
     if (enabled && this.mediaFacing !== 'user') return // back camera: never mirror
     if (enabled && this.sharing) return // while sharing, mirror has no effect
-    if (enabled === this.mirrored) return
-    if (enabled) await this.startMirror()
-    else await this.stopMirror()
+
+    // Keep the original camera track as the outgoing WebRTC track. Replacing
+    // it with canvas.captureStream() caused black frames on some mobile
+    // browsers and could alter the transmitted aspect ratio. The local
+    // VideoTile applies a CSS mirror, which does not affect the sent track.
+    // Intentionally do not start/stop the canvas mirror pipeline here.
+    void enabled
   }
 
   private async startMirror() {
