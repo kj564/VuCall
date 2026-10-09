@@ -733,7 +733,10 @@ export function CallRoom() {
               )}
             />
             <CallTimer startedAt={callStartedAt} running={connected} />
-            {recording && <span className="text-red-400">REC</span>}
+            <span className="mx-1 h-3 w-px bg-white/20" aria-hidden="true" />
+            <QualityBars quality={networkQuality} />
+            <span className="sr-only">Kualitas jaringan</span>
+            {recording && <span className="text-red-400">REC</span>
           </div>
         )}
 
