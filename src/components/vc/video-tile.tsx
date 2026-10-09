@@ -40,11 +40,41 @@ export function VideoTile({
   React.useEffect(() => {
     const el = videoRef.current
     if (!el) return
+
     el.srcObject = stream
-    // play() can reject if the element isn't ready or autoplay is blocked;
-    // we don't care — the user gesture that started the call already unlocked
-    // autoplay for media with sound.
-    el.play().catch(() => {})
+    let disposed = false
+
+    // A remote stream can be assigned before its first video frame arrives.
+    // Retry playback as metadata/data becomes available instead of making one
+    // early play() call and leaving the tile black if that call rejects.
+    const tryPlay = () => {
+      if (disposed || !stream || stream.getVideoTracks().every((track) => track.readyState === 'ended')) return
+      void el.play().catch(() => {
+        // Autoplay restrictions vary by browser. Keep the element attached and
+        // retry on the next media-ready event or direct user interaction.
+      })
+    }
+    const retryOnInteraction = () => tryPlay()
+    el.addEventListener('loadedmetadata', tryPlay)
+    el.addEventListener('loadeddata', tryPlay)
+    el.addEventListener('canplay', tryPlay)
+    document.addEventListener('pointerdown', retryOnInteraction, { passive: true })
+    document.addEventListener('keydown', retryOnInteraction)
+
+    const tracks = stream?.getTracks() ?? []
+    for (const track of tracks) track.addEventListener('unmute', tryPlay)
+    tryPlay()
+
+    return () => {
+      disposed = true
+      el.removeEventListener('loadedmetadata', tryPlay)
+      el.removeEventListener('loadeddata', tryPlay)
+      el.removeEventListener('canplay', tryPlay)
+      document.removeEventListener('pointerdown', retryOnInteraction)
+      document.removeEventListener('keydown', retryOnInteraction)
+      for (const track of tracks) track.removeEventListener('unmute', tryPlay)
+      if (el.srcObject === stream) el.srcObject = null
+    }
   }, [stream])
 
   // Keep the muted attribute in sync with the prop (also helps autoplay policy).
