@@ -194,9 +194,8 @@ export class CallManager {
             ? (pc.localDescription.toJSON() as RTCSessionDescriptionInit)
             : null
         }
-      } catch {
-        // A competing offer/answer may have interleaved (glare) — non-fatal;
-        // the glare is resolved by the polite peer in handleSignal.
+      } catch (error) {
+        console.error('[vc] negotiation failed:', error)
       } finally {
         this.makingOffer = false
       }
@@ -306,9 +305,9 @@ export class CallManager {
       } else if (msg.type === 'renegotiate-request') {
         await this.restartConnection('remote-request')
       }
-    } catch {
-      // Glare / state errors are non-fatal — the polite peer's answer resolves
-      // the negotiation. Logged silently to avoid noise.
+    } catch (error) {
+      // Surface signaling/SDP errors so a stuck connection can be diagnosed.
+      console.error('[vc] signal handling failed:', error)
     }
   }
 
