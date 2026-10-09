@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import {
   ArrowLeft,
   Check,
+  Circle,
   Copy,
   Eye,
   EyeOff,
@@ -12,6 +13,7 @@ import {
   Minimize2,
   PhoneOff,
   Share2,
+  Square,
 } from 'lucide-react'
 import { Signaling, type IncomingSignal } from '@/lib/signaling'
 import { CallManager, acquireLocalMedia, type AcquiredMedia, type CallStatus } from '@/lib/webrtc'
@@ -98,6 +100,7 @@ export function CallRoom() {
     fullscreen,
     mirror,
     facing,
+    recording,
     setRoom,
     setStatus,
     setLocalStream,
@@ -114,6 +117,7 @@ export function CallRoom() {
     setFullscreen,
     setMirror,
     setFacing,
+    setRecording,
   } = useVCStore()
 
   // Derived status flags (declared up-front so the effects below can reference
@@ -133,6 +137,8 @@ export function CallRoom() {
   const mediaCleanupRef = useRef<(() => void) | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
   const camOnRef = useRef(camOn)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
   const [copied, setCopied] = useState(false)
   const [joined, setJoined] = useState(false)
 
@@ -337,6 +343,10 @@ export function CallRoom() {
   }, [connected])
 
   function handleEnd() {
+    // Stop recording if active.
+    if (recorderRef.current?.state === 'recording') {
+      recorderRef.current.stop()
+    }
     if (typeof document !== 'undefined') {
       if (document.pictureInPictureElement) {
         document.exitPictureInPicture().catch(() => {})
@@ -463,6 +473,48 @@ export function CallRoom() {
       }
     } catch {
       /* fullscreen may be blocked — ignore */
+    }
+  }
+
+  /** Call recording — MediaRecorder on the remote stream → download .webm. */
+  function handleToggleRecording() {
+    if (recording) {
+      recorderRef.current?.stop()
+      return
+    }
+    const remoteVideo = document.querySelector<HTMLVideoElement>('[data-vc="remote"] video')
+    const stream = remoteVideo?.srcObject as MediaStream | undefined
+    if (!stream) {
+      toast({ title: 'Belum ada video untuk direkam.' })
+      return
+    }
+    try {
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+        ? 'video/webm;codecs=vp9,opus'
+        : 'video/webm'
+      const mr = new MediaRecorder(stream, { mimeType })
+      chunksRef.current = []
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data)
+      }
+      mr.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'video/webm' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `vucall-recording-${Date.now()}.webm`
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        URL.revokeObjectURL(url)
+        setRecording(false)
+        toast({ title: 'Rekaman tersimpan', description: 'File .webm diunduh.' })
+      }
+      mr.start(1000)
+      recorderRef.current = mr
+      setRecording(true)
+    } catch {
+      toast({ title: 'Rekaman tidak didukung di browser ini.' })
     }
   }
 
@@ -627,7 +679,7 @@ export function CallRoom() {
           </div>
         )}
 
-        {/* Top-left utility buttons (tiny, subtle): mirror + PiP */}
+        {/* Top-left utility buttons (tiny, subtle): mirror + PiP + record */}
         <div className="absolute left-3 top-3 z-20 flex flex-col gap-2">
           <button
             type="button"
@@ -656,7 +708,34 @@ export function CallRoom() {
           >
             <Minimize2 className="size-5" />
           </button>
+          <button
+            type="button"
+            aria-label={recording ? 'Stop recording' : 'Record call'}
+            aria-pressed={recording}
+            title="Rekam panggilan"
+            onClick={handleToggleRecording}
+            className={cn(
+              'flex size-9 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition hover:bg-black/60',
+              recording && 'bg-red-600 text-white',
+            )}
+          >
+            {recording ? <Square className="size-4" /> : <Circle className="size-4" />}
+          </button>
         </div>
+
+        {/* Minimal timer + recording indicator (top-center, subtle) */}
+        {connected && (
+          <div className="absolute top-3 left-1/2 z-20 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-black/40 px-2.5 py-0.5 text-xs text-white/80 backdrop-blur">
+            <span
+              className={cn(
+                'inline-block size-1.5 rounded-full',
+                recording ? 'bg-red-500 animate-pulse' : 'bg-emerald-400',
+              )}
+            />
+            <CallTimer startedAt={callStartedAt} running={connected} />
+            {recording && <span className="text-red-400">REC</span>}
+          </div>
+        )}
 
         {/* Waiting share card (only while alone) */}
         {showWaiting && (

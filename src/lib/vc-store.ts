@@ -26,6 +26,8 @@ type VCState = {
   // Mirror the front (user) camera preview; back camera is never mirrored.
   mirror: boolean
   facing: 'user' | 'environment'
+  // Call recording (MediaRecorder on the remote stream → download webm).
+  recording: boolean
 
   setRoom: (roomId: string | null, role: 'caller' | 'callee' | null) => void
   setStatus: (status: CallStatus, detail?: string) => void
@@ -43,6 +45,7 @@ type VCState = {
   setFullscreen: (v: boolean) => void
   setMirror: (v: boolean) => void
   setFacing: (v: 'user' | 'environment') => void
+  setRecording: (v: boolean) => void
   reset: () => void
 }
 
@@ -65,6 +68,7 @@ export const useVCStore = create<VCState>((set) => ({
   fullscreen: false,
   mirror: true,
   facing: 'user',
+  recording: false,
 
   setRoom: (roomId, role) => set({ roomId, role }),
   setStatus: (status, statusDetail) => set({ status, statusDetail }),
@@ -83,6 +87,7 @@ export const useVCStore = create<VCState>((set) => ({
   setFullscreen: (fullscreen) => set({ fullscreen }),
   setMirror: (mirror) => set({ mirror }),
   setFacing: (facing) => set({ facing }),
+  setRecording: (recording) => set({ recording }),
 
   reset: () =>
     set({
@@ -104,5 +109,6 @@ export const useVCStore = create<VCState>((set) => ({
       fullscreen: false,
       mirror: true,
       facing: 'user',
+      recording: false,
     }),
 }))

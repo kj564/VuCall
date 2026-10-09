@@ -4,6 +4,7 @@ import * as React from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowRight,
+  PhoneCall,
   ShieldCheck,
   Users,
   Video,
@@ -43,18 +44,18 @@ const FEATURES: { icon: React.ReactNode; text: string }[] = [
  */
 export function Lobby() {
   const router = useRouter()
-  const [code, setCode] = React.useState('')
-  const trimmed = code.trim()
+  const [roomName, setRoomName] = React.useState('')
+  const trimmedName = roomName.trim().toLowerCase().replace(/[^a-z0-9-]/g, '')
 
   const startCall = () => {
-    const id = genRoomId()
+    const id = trimmedName || genRoomId()
     router.push(`/?room=${id}`)
   }
 
   const joinCall = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!trimmed) return
-    router.push(`/?room=${trimmed}`)
+    if (!trimmedName) return
+    router.push(`/?room=${trimmedName}`)
   }
 
   return (
@@ -78,20 +79,34 @@ export function Lobby() {
           Video call 1:1 yang tidak gampang terputus.
         </p>
 
-        {/* Primary CTA */}
-        <button
-          type="button"
-          onClick={startCall}
-          className="w-full rounded-lg bg-primary px-4 py-3 font-medium text-primary-foreground transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          Mulai panggilan
-        </button>
+        {/* Room name input + start button */}
+        <form onSubmit={(e) => { e.preventDefault(); startCall() }} className="flex flex-col gap-3">
+          <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
+            spellCheck={false}
+            value={roomName}
+            onChange={(e) => setRoomName(e.target.value)}
+            placeholder="Nama ruangan (atau kosongkan untuk acak)"
+            aria-label="Nama ruangan"
+            maxLength={30}
+            className="w-full rounded-lg border border-transparent bg-secondary px-3 py-3 text-sm text-foreground outline-none focus:border-primary placeholder:text-muted-foreground"
+          />
+          <button
+            type="submit"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-medium text-primary-foreground transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <PhoneCall className="size-5" />
+            Mulai panggilan
+          </button>
+        </form>
 
         {/* Divider */}
         <div className="flex items-center gap-3" aria-hidden="true">
           <span className="h-px flex-1 bg-border" />
           <span className="text-xs uppercase tracking-wider text-muted-foreground">
-            atau
+            atau gabung
           </span>
           <span className="h-px flex-1 bg-border" />
         </div>
@@ -104,16 +119,16 @@ export function Lobby() {
             autoComplete="off"
             autoCapitalize="characters"
             spellCheck={false}
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            placeholder="Kode ruangan"
-            aria-label="Kode ruangan"
-            maxLength={12}
+            value={roomName}
+            onChange={(e) => setRoomName(e.target.value)}
+            placeholder="Ketik nama ruangan teman"
+            aria-label="Nama ruangan untuk bergabung"
+            maxLength={30}
             className="flex-1 rounded-lg border border-transparent bg-secondary px-3 py-3 text-sm text-foreground outline-none focus:border-primary placeholder:text-muted-foreground"
           />
           <button
             type="submit"
-            disabled={!trimmed}
+            disabled={!trimmedName}
             aria-label="Gabung ruangan"
             className="inline-flex items-center gap-1.5 rounded-lg bg-foreground px-4 py-3 text-sm font-medium text-background transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
           >
