@@ -802,33 +802,62 @@ export async function acquireLocalMedia(
     noiseSuppression: true,
     autoGainControl: true,
   }
+
+  // Try video and audio SEPARATELY — if the user grants camera but denies mic
+  // (or mic is in-use), getUserMedia({video, audio}) fails entirely. By trying
+  // them separately, the camera works even without a mic.
+  const combined = new MediaStream()
+  const cleanups: Array<() => void> = []
+  let hasVideo = false
+  let hasAudio = false
+
+  // 1. Try video.
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+    const vs = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    })
+    for (const t of vs.getVideoTracks()) {
+      combined.addTrack(t)
+      hasVideo = true
+    }
+    cleanups.push(() => vs.getTracks().forEach((t) => t.stop()))
+  } catch {
+    // Camera denied/unavailable.
+  }
+
+  // 2. Try audio (separately — won't fail just because camera did).
+  try {
+    const as = await navigator.mediaDevices.getUserMedia({
+      video: false,
       audio: audioConstraints,
     })
-    return {
-      stream,
-      synthetic: false,
-      camEnabled: stream.getVideoTracks().length > 0,
-      cleanup: () => {},
+    for (const t of as.getAudioTracks()) {
+      combined.addTrack(t)
+      hasAudio = true
     }
+    cleanups.push(() => as.getTracks().forEach((t) => t.stop()))
   } catch {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: false,
-        audio: audioConstraints,
-      })
-      return { stream, synthetic: false, camEnabled: false, cleanup: () => {} }
-    } catch {
-      const syn = createSyntheticStream()
-      return {
-        stream: syn.stream,
-        synthetic: true,
-        camEnabled: true,
-        cleanup: syn.cleanup,
-      }
+    // Mic denied/unavailable.
+  }
+
+  // 3. If we got at least video OR audio → return the real stream.
+  if (hasVideo || hasAudio) {
+    return {
+      stream: combined,
+      synthetic: false,
+      camEnabled: hasVideo,
+      cleanup: () => cleanups.forEach((fn) => fn()),
     }
+  }
+
+  // 4. Nothing at all → synthetic fallback (video + silent audio).
+  const syn = createSyntheticStream()
+  return {
+    stream: syn.stream,
+    synthetic: true,
+    camEnabled: true,
+    cleanup: syn.cleanup,
   }
 }
 
