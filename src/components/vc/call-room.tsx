@@ -15,7 +15,6 @@ import { CallManager, acquireLocalMedia, type AcquiredMedia, type CallStatus } f
 import { useVCStore } from '@/lib/vc-store'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
-import { useSpeakingIndicator } from '@/hooks/use-speaking-indicator'
 import { cn } from '@/lib/utils'
 import { VideoTile } from './video-tile'
 import { CallControls } from './call-controls'
@@ -153,11 +152,6 @@ export function CallRoom() {
       navigator.mediaDevices?.removeEventListener?.('devicechange', refreshCameraSupport)
     }
   }, [localStream])
-
-  // Active-speaker ring: pulses the local PiP when the local user speaks.
-  // Only enabled while in-call + mic on (after a user gesture, so AudioContext
-  // is allowed to start).
-  const isSpeaking = useSpeakingIndicator(localStream, joined && micOn)
 
   // Keep a ref in sync with the store's localStream so toggle handlers (which
   // run during pre-join, before the manager exists) can flip track.enabled.
