@@ -8,7 +8,6 @@ import {
   Copy,
   MessageCircle,
   Mic,
-  Plus,
   ShieldCheck,
   Sparkles,
   Heart,
