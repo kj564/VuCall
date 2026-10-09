@@ -59,6 +59,8 @@ export class CallManager {
   // Buffered initial offer / candidates (until the peer is present)
   private pendingOffer: RTCSessionDescriptionInit | null = null
   private pendingCandidates: RTCIceCandidateInit[] = []
+  // ICE can arrive before the remote SDP is installed; buffer it until then.
+  private pendingRemoteCandidates: RTCIceCandidateInit[] = []
 
   // Reconnection bookkeeping
   private reconnectAttempts = 0
@@ -271,16 +273,30 @@ export class CallManager {
         if (this.ignoreOffer) return
 
         await pc.setRemoteDescription(desc)
+        // Trickle ICE may arrive before the offer/answer over MQTT.
+        const queuedCandidates = this.pendingRemoteCandidates.splice(0)
+        for (const candidate of queuedCandidates) {
+          try {
+            await pc.addIceCandidate(candidate)
+          } catch (candidateError) {
+            if (!this.ignoreOffer) console.warn('[webrtc] queued ICE candidate rejected:', candidateError)
+          }
+        }
         if (msg.type === 'offer') {
           const answer = await pc.createAnswer()
           await pc.setLocalDescription(answer)
           this.signaling.sendSignal('answer', pc.localDescription)
         }
       } else if (msg.type === 'ice') {
+        const candidate = msg.data as RTCIceCandidateInit
+        if (!pc.remoteDescription) {
+          this.pendingRemoteCandidates.push(candidate)
+          return
+        }
         try {
-          await pc.addIceCandidate(msg.data as RTCIceCandidateInit)
+          await pc.addIceCandidate(candidate)
         } catch (e) {
-          if (!this.ignoreOffer) throw e
+          if (!this.ignoreOffer) console.warn('[webrtc] ICE candidate rejected:', e)
         }
       } else if (msg.type === 'renegotiate-request') {
         await this.restartConnection('remote-request')
