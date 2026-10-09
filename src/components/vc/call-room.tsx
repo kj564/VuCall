@@ -571,8 +571,8 @@ export function CallRoom() {
 
   // ---- Active call: video takes the available space; essential controls live in a quiet side panel. ----
   return (
-    <div className="flex h-[100dvh] w-full overflow-hidden bg-[#101114] text-white">
-      <div ref={wrapperRef} className="relative min-w-0 flex-1 overflow-hidden bg-black">
+    <div ref={wrapperRef} className="flex h-[100dvh] w-full overflow-hidden bg-[#101114] text-white">
+      <div className="relative min-w-0 flex-1 overflow-hidden bg-black">
         <div data-vc="remote" className="absolute inset-0">
           <VideoTile
             stream={remoteStream}
@@ -649,7 +649,7 @@ export function CallRoom() {
 
       <aside aria-label="Panel kontrol panggilan" className="z-30 flex w-[84px] shrink-0 flex-col items-center border-l border-white/10 bg-[#151619] px-2 py-3 sm:w-[104px] sm:px-3 sm:py-4">
         <div className="mb-4 flex flex-col items-center gap-1">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-white/8 text-sm font-semibold tracking-tight">V</div>
+          <div className="flex size-8 items-center justify-center rounded-lg bg-white/[0.08] text-sm font-semibold tracking-tight">V</div>
           <span className="text-[10px] font-medium tracking-wide text-white/55">VuCall</span>
         </div>
         <CallControls
