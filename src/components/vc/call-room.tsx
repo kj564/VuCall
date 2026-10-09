@@ -165,66 +165,66 @@ export function CallRoom() {
     }
   }, [roomId])
 
-  // Connect signaling + build the peer connection only after the user clicks
-  // "Join call" (Instagram-style pre-join gate).
+  // Connect MQTT signaling after "Join call". The CallManager is created when
+  // a peer is DISCOVERED (onPeerJoined) — serverless, symmetric glare.
   useEffect(() => {
     if (!roomId || !joined) return
     let disposed = false
 
-    const signaling = new Signaling({
-      onConnect: async () => {
-        if (disposed) return
-        const res = await signaling.joinRoom(roomId)
-        if (disposed) return
-        if (!res.ok) {
-          setError('Ruangan penuh atau tidak valid.')
-          setStatus('failed', 'room-full')
-          return
-        }
-        setRoom(roomId, res.youAreCaller ? 'caller' : 'callee')
-
-        const manager = new CallManager(signaling, !res.youAreCaller, {
-          onRemoteStream: (s) => {
-            if (!disposed) setRemoteStream(s)
-          },
-          onStatus: (st: CallStatus, detail?: string) => {
-            if (disposed) return
-            setStatus(st, detail)
-            if (st === 'connected') startCallTimer()
-          },
-          onReconnectAttempt: (n: number) => {
-            if (!disposed) setReconnectAttempt(n)
-          },
-          onError: (m: string) => {
-            if (!disposed) setError(m)
-          },
-          onQuality: (q) => {
-            if (!disposed) setNetworkQuality(q)
-          },
-        })
-        managerRef.current = manager
-
-        for (const m of pendingSignals.current) {
-          void manager.handleSignal(m)
-        }
-        pendingSignals.current = []
-
-        // Reuse the media acquired during pre-join (no re-prompt / double-acquire).
-        await manager.start(mediaRef.current ?? undefined)
+    const createManager = (polite: boolean) => {
+      if (managerRef.current || disposed) return
+      const manager = new CallManager(signaling, polite, {
+        onRemoteStream: (s) => {
+          if (!disposed) setRemoteStream(s)
+        },
+        onStatus: (st: CallStatus, detail?: string) => {
+          if (disposed) return
+          setStatus(st, detail)
+          if (st === 'connected') startCallTimer()
+        },
+        onReconnectAttempt: (n: number) => {
+          if (!disposed) setReconnectAttempt(n)
+        },
+        onError: (m: string) => {
+          if (!disposed) setError(m)
+        },
+        onQuality: (q) => {
+          if (!disposed) setNetworkQuality(q)
+        },
+      })
+      managerRef.current = manager
+      // Drain any signals that arrived before the manager was ready.
+      for (const m of pendingSignals.current) {
+        void manager.handleSignal(m)
+      }
+      pendingSignals.current = []
+      // Reuse the media acquired during pre-join.
+      void manager.start(mediaRef.current ?? undefined).then(() => {
         if (disposed) {
           manager.close()
           return
         }
-        // Apply the front-camera mirror canvas (if enabled) so the SENT stream
-        // is mirrored from the start — the receiver sees it mirrored.
         if (mirror && manager.getFacing() === 'user') {
-          await manager.setMirrored(true)
+          void manager.setMirrored(true)
         }
         const ls = manager.getLocalStream()
         if (ls) setLocalStream(ls)
+      })
+    }
+
+    const signaling = new Signaling({
+      onConnect: () => {
+        if (disposed) return
+        setStatus('waiting', 'menunggu teman bergabung')
       },
-      onPeerJoined: () => managerRef.current?.onPeerJoined(),
-      onPeerLeft: () => managerRef.current?.onPeerLeft(),
+      onPeerJoined: (info: { from: string; polite: boolean }) => {
+        if (disposed) return
+        setRoom(roomId, info.polite ? 'callee' : 'caller')
+        createManager(info.polite)
+      },
+      onPeerLeft: () => {
+        managerRef.current?.onPeerLeft()
+      },
       onSignal: (msg: IncomingSignal) => {
         if (managerRef.current) {
           void managerRef.current.handleSignal(msg)
@@ -232,14 +232,10 @@ export function CallRoom() {
           pendingSignals.current.push(msg)
         }
       },
-      onRoomFull: () => {
-        if (disposed) return
-        setError('Ruangan penuh. Coba buat ruangan baru.')
-        setStatus('failed', 'room-full')
-      },
     })
     signalingRef.current = signaling
     signaling.connect()
+    void signaling.joinRoom(roomId)
 
     return () => {
       disposed = true
@@ -251,6 +247,7 @@ export function CallRoom() {
       }
       managerRef.current?.close()
       managerRef.current = null
+      signaling.leaveRoom()
       signaling.disconnect()
       signalingRef.current = null
       pendingSignals.current = []

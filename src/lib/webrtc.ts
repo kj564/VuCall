@@ -129,14 +129,11 @@ export class CallManager {
     // Replay any signals that arrived while the peer connection was being set up.
     this.drainPendingSignals()
 
-    // The polite peer (callee) has a partner already; the impolite peer
-    // (caller) waits for `room:peer-joined` before flushing its offer.
-    if (!this.polite) {
-      this.setStatus('waiting', 'menunggu teman bergabung')
-    } else {
-      this.peerPresent = true
-      this.setStatus('connecting')
-    }
+    // With serverless (MQTT) signaling, the manager is created when the peer
+    // is already discovered → peerPresent = true. Both peers send offers
+    // (symmetric glare), resolved by the polite/impolite roles.
+    this.peerPresent = true
+    this.setStatus('connecting')
     return stream
   }
 

@@ -588,3 +588,26 @@ Agent Browser verification (room REV8, 2 sessions, clean restart):
 
 Stage Summary:
 - 3 runtime errors fixed (stopMirror null, m-line asymmetry via synthetic audio, glare silently caught). iOS PiP improved (webkit API + auto-PiP on leave-app). 2-peer connects cleanly with no console noise. Reconnect + mirror pipeline + clean Instagram UI all intact.
+
+---
+Task ID: github-pages
+Agent: main
+Task: Host VuCall on GitHub Pages (static) — replace socket.io signaling with serverless MQTT + static export.
+
+Work Log:
+- Challenge: GitHub Pages = static only (no server process). The socket.io mini-service + Caddy gateway can't run. Replaced signaling with a PUBLIC MQTT broker over WebSocket (serverless).
+- Added `mqtt` package. Rewrote `src/lib/signaling.ts`: Signaling class now connects to `wss://broker.emqx.io:8084/mqtt` (public EMQX broker, configurable via NEXT_PUBLIC_MQTT_URL). Room = MQTT topic `vucall/{roomId}`. Presence: announce "join" + ping every 5s (late-joiners discover you) + LWT "leave" on disconnect. Polite/impolite role = (myId > peerId) deterministically. Signals (offer/answer/ice) published to the topic; own messages ignored.
+- call-room.tsx: restructured the flow for MQTT — on "Join call", connect + joinRoom; the CallManager is created when a peer is DISCOVERED (onPeerJoined, with the polite role from id comparison) → manager.start(media) with peerPresent=true (symmetric glare, both send offers, polite yields).
+- CallManager.start(): set peerPresent=true always (MQTT symmetric) + status 'connecting' (no caller/callee asymmetry).
+- next.config.ts: `output: 'export'` (static) + basePath/assetPrefix from NEXT_PUBLIC_BASE_PATH (for GitHub Pages project sites) + images.unoptimized.
+- package.json: simplified `build` to `next build` (export produces ./out).
+- `.github/workflows/deploy.yml`: GitHub Actions — on push to main, setup bun, install, build with NEXT_PUBLIC_BASE_PATH=/<repo>, upload ./out, deploy to GitHub Pages.
+- `public/.nojekyll` (safeguard) + `GITHUB_PAGES.md` (deploy instructions).
+- The socket.io mini-service (mini-services/signaling-service) is now UNUSED (kept for reference) — MQTT replaced it for static hosting.
+
+Agent Browser verification (room FINALMQTT, 2 sessions, via gateway):
+- A remote ready=4, B remote ready=4 → connected via the PUBLIC MQTT broker (ice state: checking → connected). No errors. ✓
+- Lint clean, dev server 200 (output:'export' doesn't affect `next dev`).
+
+Stage Summary:
+- VuCall is now deployable to GitHub Pages: static export + serverless MQTT signaling (public broker, no server to run). GitHub Actions workflow auto-deploys on push to main. To deploy: push to GitHub → enable Pages (Source: GitHub Actions) → push to main → live at https://<user>.github.io/<repo>/.
